@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>動態平衡股票資金 專業版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-slate-50 p-4 md:p-8 text-slate-700 font-sans">
+    <div id="app" class="max-w-6xl mx-auto">
+        
+        <div class="bg-white rounded-3xl shadow-sm p-8 mb-8 flex flex-col lg:flex-row items-center gap-12 border border-slate-100 shadow-indigo-100/20">
+            <div class="w-48 h-48 relative flex-shrink-0">
+                <canvas id="stockChart"></canvas>
+                <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
+                    <span class="text-[10px] text-slate-400">總資產價值</span><br>
+                    <span class="text-sm font-bold text-slate-800">NT$ {{ (totalMarketValue + cash).toLocaleString() }}</span>
+                </div>
+            </div>
+            
+            <div class="flex-1 grid grid-cols-2 md:grid-cols-4 gap-8 w-full text-center md:text-left">
+                <div>
+                    <p class="text-slate-400 text-xs font-medium uppercase tracking-wider">可用現金</p >
+                    <p class="text-2xl font-bold text-emerald-600 font-mono">NT$ {{ cash.toLocaleString() }}</p >
+                </div>
+                <div>
+                    <p class="text-slate-400 text-xs font-medium uppercase tracking-wider">總持股市值</p >
+                    <p class="text-2xl font-bold text-slate-800 font-mono">NT$ {{ totalMarketValue.toLocaleString() }}</p >
+                </div>
+                <div>
+                    <p class="text-slate-400 text-xs font-medium uppercase tracking-wider">總報酬率</p >
+                    <p class="text-2xl font-bold font-mono" :class="totalProfit >= 0 ? 'text-rose-500' : 'text-emerald-500'">{{ totalReturnRate }}%</p >
+                </div>
+                <div>
+                    <p class="text-slate-400 text-xs font-medium uppercase tracking-wider">目標設定總計</p >
+                    <p class="text-2xl font-bold font-mono" :class="totalTargetRatio > 100 ? 'text-red-500' : 'text-indigo-600'">
+                        {{ totalTargetRatio }}%
+                        <span v-if="totalTargetRatio > 100" class="text-xs block text-red-400">⚠️ 配置超額</span>
+                    </p >
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <h3 class="font-bold mb-3 text-sm flex items-center">💰 可投入現金</h3>
+                <input v-model.number="cash" @change="saveData" type="number" placeholder="目前餘額" class="w-full p-3 border rounded-xl bg-emerald-50 border-emerald-100 outline-none font-bold text-emerald-700">
+            </div>
+            <div class="lg:col-span-3 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm" :class="{'ring-2 ring-orange-400': isEditing}">
+                <h3 class="font-bold mb-3 text-sm">{{ isEditing ? '⚠️ 修改資產內容' : '➕ 新增標的配比' }}</h3>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <input v-model="form.code" type="text" placeholder="代號 (如 2330)" class="p-3 border rounded-xl bg-slate-50 outline-none" :disabled="isEditing">
+                    <input v-model.number="form.shares" type="number" placeholder="持有股數" class="p-3 border rounded-xl bg-slate-50 outline-none">
+                    <input v-model.number="form.avgPrice" type="number" placeholder="買入均價" class="p-3 border rounded-xl bg-slate-50 outline-none">
+                    <input v-model.number="form.targetRatio" type="number" placeholder="目標占比 %" class="p-3 border rounded-xl bg-indigo-50 border-indigo-100 font-bold outline-none">
+                    <button @click="handleSave" class="md:col-span-4 bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 transition">儲存配置</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200">
+            <table class="w-full text-left">
+                <thead class="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-widest">
+                    <tr>
+                        <th class="p-4">標的</th>
+                        <th class="p-4 text-right">持有市值</th>
+                        <th class="p-4 text-center">目前占比 / 目標</th>
+                        <th class="p-4 text-center text-blue-600">即時現價</th>
+                        <th class="p-4 text-center">再平衡建議</th>
+                        <th class="p-4 text-right">管理</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    <tr v-for="(item, index) in stocks" :key="index" class="hover:bg-slate-50 transition text-sm">
+                        <td class="p-4">
+                            <div class="flex items-center gap-3">
+                                <div class="w-2 h-10 rounded-full flex-shrink-0 shadow-sm" :style="{ backgroundColor: item.color }"></div>
+                                <div>
+                                    <div class="font-bold text-slate-800">{{ item.code }}</div>
+                                    <div class="text-[10px] text-slate-400">{{ item.name || 'API 抓取中...' }}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="p-4 text-right">
+                            <div class="font-bold text-slate-700 font-mono">NT$ {{ Math.round(item.shares * (item.currentPrice || 0)).toLocaleString() }}</div>
+                            <div class="text-[10px] text-slate-400">{{ item.shares.toLocaleString() }} 股</div>
+                        </td>
+                        <td class="p-4 text-center font-bold font-mono">
+                            <span>{{ calculateCurrentRatio(item) }}%</span>
+                            <span class="text-slate-300 mx-1">/</span>
+                            <span class="text-indigo-600">{{ item.targetRatio || 0 }}%</span>
+                        </td>
+                        <td class="p-4 text-center font-bold text-blue-600 font-mono">{{ item.currentPrice || '---' }}</td>
+                       <td class="p-4 text-center">
+                            <div v-if="item.targetRatio === 0 && item.shares > 0">
+                                <p class="text-blue-600 font-bold text-xs">建議清倉 -{{ item.shares }} 股</p >
+                                <p class="text-[10px] text-slate-400">可收回 NT$ {{ (item.shares * item.currentPrice).toLocaleString() }}</p >
+                            </div>
+                            
+                            <div v-else-if="suggestShares(item) > 0">
+                                <p class="text-orange-600 font-bold">加碼 +{{ suggestShares(item) }} 股</p >
+                                <p class="text-[10px]" :class="(suggestShares(item) * item.currentPrice) > cash ? 'text-red-500 font-bold' : 'text-slate-400'">
+                                    {{ (suggestShares(item) * item.currentPrice) > cash ? '現金不足 需' : '需' }} NT$ {{ (suggestShares(item) * item.currentPrice).toLocaleString() }}
+                                </p >
+                            </div>
+                            
+                            <div v-else-if="suggestShares(item) < 0">
+                                <p class="text-blue-600 font-bold text-xs">減碼 {{ suggestShares(item) }} 股</p >
+                                <p class="text-[10px] text-slate-400">收回 NT$ {{ Math.abs(suggestShares(item) * item.currentPrice).toLocaleString() }}</p >
+                            </div>
+                            
+                            <span v-else class="text-slate-300 italic text-xs">精準達標</span>
+                        </td>
+                        <td class="p-right p-4">
+                            <button @click="startEdit(index)" class="text-blue-500 mr-4 text-xs font-bold hover:underline">修改</button>
+                            <button @click="removeStock(index)" class="text-slate-300 hover:text-rose-500 transition">✕</button>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+        createApp({
+            data() {
+                return {
+                    cash: JSON.parse(localStorage.getItem('myRebal_cash')) || 0,
+                    form: { code: '', shares: null, avgPrice: null, targetRatio: null },
+                    isEditing: false, editIndex: null,
+                    stocks: JSON.parse(localStorage.getItem('myRebal_data')) || [],
+                    token: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJkYXRlIjoiMjAyNi0wMS0xNCAwOToyODo0OSIsInVzZXJfaWQiOiJsZW9udHNhaTg5ODkiLCJlbWFpbCI6InRvYnl0c2FpODkyNkBnbWFpbC5jb20iLCJpcCI6IjIxMC41OS4xNjUuMTYzIn0.yiY12G1Wi2V9fCZiwrpLVWYF6L1PrG8ENUtF7e_7XrU',
+                    chartInstance: null,
+                    colorPalette: [
+                        '#ef4444', '#f97316', '#f59e0b', '#84cc16', 
+                        '#10b981', '#06b6d4', '#3b82f6', '#6366f1', 
+                        '#a855f7', '#ec4899', '#f43f5e', '#eab308', 
+                        '#22c55e', '#0ea5e9', '#8b5cf6', '#d946ef'
+                    ]
+                }
+            },
+            computed: {
+                totalMarketValue() { return Math.round(this.stocks.reduce((sum, s) => sum + (s.shares * (s.currentPrice || 0)), 0)); },
+                totalCost() { return Math.round(this.stocks.reduce((sum, s) => s.currentPrice > 0 ? sum + (s.shares * s.avgPrice) : sum, 0)); },
+                totalProfit() { return this.totalMarketValue - this.totalCost; },
+                totalReturnRate() { return this.totalCost === 0 ? 0 : ((this.totalProfit / this.totalCost) * 100).toFixed(2); },
+                totalTargetRatio() { return this.stocks.reduce((sum, s) => sum + (s.targetRatio || 0), 0); }
+            },
+            methods: {
+                getNextColor() { return this.colorPalette[this.stocks.length % this.colorPalette.length]; },
+                handleSave() {
+                    if (this.isEditing) { 
+                        this.stocks[this.editIndex] = { ...this.stocks[this.editIndex], ...this.form }; 
+                        this.isEditing = false; 
+                    } else { 
+                        this.stocks.push({ ...this.form, name: '', currentPrice: 0, color: this.getNextColor() }); 
+                    }
+                    this.saveData();
+                    this.fetchStockInfo(this.stocks[this.isEditing ? this.editIndex : this.stocks.length - 1]);
+                    this.form = { code: '', shares: null, avgPrice: null, targetRatio: null };
+                },
+                startEdit(index) { this.isEditing = true; this.editIndex = index; this.form = { ...this.stocks[index] }; },
+                removeStock(index) { this.stocks.splice(index, 1); this.saveData(); },
+                saveData() { 
+                    localStorage.setItem('myRebal_data', JSON.stringify(this.stocks));
+                    localStorage.setItem('myRebal_cash', JSON.stringify(this.cash));
+                    this.updateChart(); 
+                },
+                calculateCurrentRatio(item) { 
+                    const totalAsset = this.totalMarketValue + this.cash;
+                    return totalAsset === 0 ? 0 : ((item.shares * (item.currentPrice || 0) / totalAsset) * 100).toFixed(1); 
+                },
+                suggestShares(item) {
+                    if (!item.currentPrice || !item.targetRatio) return 0;
+                    const totalAsset = this.totalMarketValue + this.cash;
+                    const idealMV = totalAsset * (item.targetRatio / 100);
+                    const currentMV = item.shares * item.currentPrice;
+                    return Math.round((idealMV - currentMV) / item.currentPrice);
+                },
+                async fetchStockInfo(stock) {
+                    const thirtyDaysAgo = new Date();
+                    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                    const startDate = thirtyDaysAgo.toISOString().split('T')[0];
+                    try {
+                        const [resN, resP] = await Promise.all([
+                            fetch(`https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockInfo&data_id=${stock.code}&token=${this.token}`),
+                            fetch(`https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPrice&data_id=${stock.code}&start_date=${startDate}&token=${this.token}`)
+                        ]);
+                        const nJ = await resN.json(); if (nJ.data && nJ.data.length > 0) stock.name = nJ.data[0].stock_name;
+                        const pJ = await resP.json(); if (pJ.data && pJ.data.length > 0) stock.currentPrice = pJ.data[pJ.data.length - 1].close;
+                        this.updateChart();
+                    } catch (e) { console.error("抓取失敗", e); }
+                },
+                updateChart() {
+                    const ctx = document.getElementById('stockChart').getContext('2d');
+                    if (this.chartInstance) this.chartInstance.destroy();
+
+                    const dataLabels = this.stocks.map(s => s.code);
+                    const dataValues = this.stocks.map(s => s.shares * (s.currentPrice || 0));
+                    const dataColors = this.stocks.map(s => s.color);
+                    const cashColor = '#94a3b8';
+
+                    if(this.cash > 0) { 
+                        dataLabels.push('現金'); 
+                        dataValues.push(this.cash);
+                        dataColors.push(cashColor);
+                    }
+
+                    this.chartInstance = new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: dataLabels,
+                            datasets: [{
+                                data: dataValues,
+                                backgroundColor: dataColors,
+                                borderWidth: 0, cutout: '85%'
+                            }]
+                        },
+                        options: { 
+                            plugins: { 
+                                legend: { display: false },
+                                tooltip: {
+                                    callbacks: {
+                                        label: (ctx) => {
+                                            const stock = this.stocks[ctx.dataIndex];
+                                            if (stock) {
+                                                 return ` ${stock.code} (${stock.name || ''}): ${this.calculateCurrentRatio(stock)}%`;
+                                            } else {
+                                                 return ` 現金: ${this.calculateCurrentRatio({shares:1, currentPrice:this.cash})}%`;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            },
+            mounted() {
+                this.stocks.forEach((s, index) => {
+                    if (!s.color) { s.color = this.colorPalette[index % this.colorPalette.length]; }
+                    this.fetchStockInfo(s);
+                });
+                this.saveData();
+                this.updateChart();
+                setInterval(() => this.stocks.forEach(s => this.fetchStockInfo(s)), 60000);
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
