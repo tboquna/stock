@@ -23,7 +23,7 @@ if 'portfolio' not in st.session_state:
     try:
         df_portfolio = conn.read(worksheet="Portfolio", ttl=0)
         df_portfolio = df_portfolio.dropna(subset=["股票代號"])
-        df_portfolio["股票代號"] = df_portfolio["股票代號"].astype(str).str.replace(r'\.0$', '', regex=True)
+        df_portfolio["股票代號"] = df_portfolio["股票代號"].astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(4)
         st.session_state.portfolio = df_portfolio.to_dict('records')
     except Exception as e:
         st.session_state.portfolio = [
