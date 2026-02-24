@@ -109,8 +109,12 @@ if page == "📊 個人持股監控":
             def get_stock_name(ticker):
                 for item in st.session_state.portfolio:
                     if item["股票代號"] == ticker:
-                        return item["股票名稱"]
-                return ticker
+                        name = item.get("股票名稱", "")
+                        # 防呆：如果 Google 試算表名稱欄位空白 (NaN)，就顯示代號就好
+                        if pd.isna(name) or str(name).strip() == "" or str(name).lower() == "nan":
+                            return str(ticker)
+                        return str(name)
+                return str(ticker)
 
             # 3. 加上 format_func，這樣選單就只會顯示乾淨的「股票名稱」了！
             selected_ticker = st.selectbox("選擇要操作的股票", ticker_options, format_func=get_stock_name)
