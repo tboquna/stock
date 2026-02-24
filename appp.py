@@ -98,11 +98,22 @@ if page == "📊 個人持股監控":
                     except: pass
                     st.rerun()
 
+    # --- 修改 / 刪除持股 ---
     with st.sidebar.expander("✏️ 修改 / 🗑️ 刪除持股", expanded=True):
         if len(st.session_state.portfolio) > 0:
-            ticker_options = [f"{item['股票代號']} {item['股票名稱']}" for item in st.session_state.portfolio]
-            selected_display = st.selectbox("選擇要操作的股票", ticker_options)
-            selected_ticker = selected_display.split(" ")[0]
+            
+            # 1. 背後選項清單：只存股票代號
+            ticker_options = [item['股票代號'] for item in st.session_state.portfolio]
+            
+            # 2. 建立一個轉換函式：用代號去找出股票名稱來顯示
+            def get_stock_name(ticker):
+                for item in st.session_state.portfolio:
+                    if item["股票代號"] == ticker:
+                        return item["股票名稱"]
+                return ticker
+
+            # 3. 加上 format_func，這樣選單就只會顯示乾淨的「股票名稱」了！
+            selected_ticker = st.selectbox("選擇要操作的股票", ticker_options, format_func=get_stock_name)
             
             current_item = next(item for item in st.session_state.portfolio if item["股票代號"] == selected_ticker)
             current_group = current_item.get("群組", "其他")
