@@ -43,41 +43,40 @@ for item in st.session_state.portfolio:
 # 2. 側邊欄 (Sidebar) - 分頁導覽
 # ==========================================
 st.sidebar.title("🧭 網站導覽")
-page = st.sidebar.radio("選擇頁面", ["📊 個人持股監控", "⚡ 當沖開盤環境評估", "😱 市場恐慌指數 (VIX)", "🔍 個股 K 線與進場分析"])
+# 🔥 新增盤後籌碼追蹤分頁
+page = st.sidebar.radio("選擇頁面", [
+    "📊 個人持股監控", 
+    "⚡ 當沖開盤環境評估", 
+    "🏦 盤後籌碼主力追蹤", 
+    "😱 市場恐慌指數 (VIX)", 
+    "🔍 個股 K 線與進場分析"
+])
 st.sidebar.divider()
 
-# 🔥 修復：獨立拆分上市與上櫃的查詢防護網
+# ==========================================
+# 3. 核心資料抓取函式 (API 串接)
+# ==========================================
 @st.cache_data(ttl=60)
 def fetch_stock_history(ticker, period="6mo"):
-    # 先嘗試上市 (.TW)
     try:
         stock = yf.Ticker(f"{ticker}.TW")
         hist = stock.history(period=period)
-        if not hist.empty: 
-            return hist, f"{ticker}.TW"
+        if not hist.empty: return hist, f"{ticker}.TW"
     except Exception:
         pass
-        
-    # 如果上市找不到或報錯，再嘗試上櫃 (.TWO)
     try:
         stock_otc = yf.Ticker(f"{ticker}.TWO")
         hist_otc = stock_otc.history(period=period)
-        if not hist_otc.empty: 
-            return hist_otc, f"{ticker}.TWO"
+        if not hist_otc.empty: return hist_otc, f"{ticker}.TWO"
     except Exception:
         pass
-        
     return None, None
 
 @st.cache_data(ttl=3600)
 def fetch_institutional(ticker):
-    start_date = (datetime.now() - timedelta(days=15)).strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=20)).strftime("%Y-%m-%d")
     url = "https://api.finmindtrade.com/api/v4/data"
-    params = {
-        "dataset": "TaiwanStockInstitutionalInvestorsBuySell",
-        "data_id": str(ticker),
-        "start_date": start_date
-    }
+    params = {"dataset": "TaiwanStockInstitutionalInvestorsBuySell", "data_id": str(ticker), "start_date": start_date}
     try:
         res = requests.get(url, params=params, timeout=5)
         data = res.json()
@@ -92,15 +91,37 @@ def fetch_institutional(ticker):
             }
             df['name'] = df['name'].map(name_map).fillna(df['name'])
             pivot_df = df.pivot_table(index='date', columns='name', values='net', aggfunc='sum').fillna(0)
-            pivot_df = pivot_df.sort_index(ascending=False).head(5)
             pivot_df = (pivot_df / 1000).round(0).astype(int)
-            pivot_df['三大法人合計'] = pivot_df.sum(axis=1)
+            if '三大法人合計' not in pivot_df.columns:
+                pivot_df['三大法人合計'] = pivot_df.sum(axis=1)
             
-            cols = pivot_df.columns.tolist()
-            if '三大法人合計' in cols:
-                cols.remove('三大法人合計')
-                cols.append('三大法人合計')
-            return pivot_df[cols]
+            # 確保欄位順序美觀
+            expected_cols = ['外資', '投信', '自營商(自有)', '自營商(避險)', '三大法人合計']
+            final_cols = [c for c in expected_cols if c in pivot_df.columns]
+            return pivot_df[final_cols].sort_index(ascending=False).head(10)
+    except:
+        pass
+    return pd.DataFrame()
+
+# 🔥 新增：抓取融資融券餘額 (散戶動向指標)
+@st.cache_data(ttl=3600)
+def fetch_margin(ticker):
+    start_date = (datetime.now() - timedelta(days=20)).strftime("%Y-%m-%d")
+    url = "https://api.finmindtrade.com/api/v4/data"
+    params = {"dataset": "TaiwanStockMarginPurchaseShortSale", "data_id": str(ticker), "start_date": start_date}
+    try:
+        res = requests.get(url, params=params, timeout=5)
+        data = res.json()
+        if data.get("msg") == "success" and len(data.get("data", [])) > 0:
+            df = pd.DataFrame(data["data"])
+            df.set_index('date', inplace=True)
+            # 轉換為張數
+            df['融資餘額(張)'] = (df['MarginPurchaseTodayBalance'] / 1000).round(0)
+            df['融券餘額(張)'] = (df['ShortSaleTodayBalance'] / 1000).round(0)
+            # 計算每日增減
+            df['融資增減'] = df['融資餘額(張)'].diff()
+            df['融券增減'] = df['融券餘額(張)'].diff()
+            return df[['融資增減', '融券增減', '融資餘額(張)', '融券餘額(張)']].sort_index(ascending=False).head(10)
     except:
         pass
     return pd.DataFrame()
@@ -305,7 +326,85 @@ if page == "📊 個人持股監控":
         )
 
 # -------------------------------------------------------------------
-# 🔥 全新分頁：當沖開盤環境評估 (包含頂部操作點位面板)
+# 🔥 全新分頁：盤後籌碼與主力追蹤
+# -------------------------------------------------------------------
+elif page == "🏦 盤後籌碼主力追蹤":
+    st.title("🏦 盤後籌碼與主力追蹤")
+    st.markdown("法人買、散戶賣，籌碼安定好發財！盤後 15:30 更新三大法人動向，20:00 更新融資融券餘額。")
+    
+    chip_ticker = st.text_input("輸入要查詢的股票代號", value="2330", placeholder="例如: 2330")
+    
+    if st.button("開始籌碼健檢", type="primary"):
+        # 取得歷史價格為了抓名稱跟現價
+        hist_data, actual_symbol = fetch_stock_history(chip_ticker, period="1mo")
+        try:
+            stock_info = yf.Ticker(actual_symbol).info
+            stock_name = stock_info.get('shortName', chip_ticker)
+        except:
+            stock_name = chip_ticker
+            
+        latest_close = round(hist_data['Close'].iloc[-1], 2) if hist_data is not None else "無資料"
+        
+        st.markdown(f"### 🔍 【{stock_name}】籌碼日報 (現價: {latest_close})")
+        
+        # 抓取資料
+        inst_df = fetch_institutional(chip_ticker)
+        margin_df = fetch_margin(chip_ticker)
+        
+        if not inst_df.empty:
+            # 合併法人與融資券資料
+            if not margin_df.empty:
+                chip_df = inst_df.join(margin_df, how='left').fillna(0)
+            else:
+                chip_df = inst_df.copy()
+            
+            # 建立圖表：三大法人買賣超柱狀圖
+            fig = go.Figure()
+            if '外資' in chip_df.columns:
+                fig.add_trace(go.Bar(x=chip_df.index, y=chip_df['外資'], name='外資', marker_color=chip_df['外資'].apply(lambda x: 'red' if x > 0 else 'green')))
+            if '投信' in chip_df.columns:
+                fig.add_trace(go.Bar(x=chip_df.index, y=chip_df['投信'], name='投信', marker_color=chip_df['投信'].apply(lambda x: 'darkred' if x > 0 else 'darkgreen')))
+            
+            fig.update_layout(title_text="📊 近 10 日外資與投信買賣超 (張數)", barmode='group', height=350, margin=dict(l=0, r=0, t=30, b=0))
+            st.plotly_chart(fig, use_container_width=True)
+
+            # --- 籌碼健康度 AI 診斷 ---
+            st.markdown("#### 🤖 系統籌碼綜合診斷")
+            recent_3d = chip_df.head(3)
+            
+            sum_foreign = recent_3d['外資'].sum() if '外資' in recent_3d.columns else 0
+            sum_trust = recent_3d['投信'].sum() if '投信' in recent_3d.columns else 0
+            sum_margin = recent_3d['融資增減'].sum() if '融資增減' in recent_3d.columns else 0
+            
+            col1, col2, col3 = st.columns(3)
+            col1.metric("近 3 日外資總計", f"{int(sum_foreign):,} 張", "買超偏多" if sum_foreign>0 else "賣超偏空", delta_color="normal" if sum_foreign>0 else "inverse")
+            col2.metric("近 3 日投信總計", f"{int(sum_trust):,} 張", "買超偏多" if sum_trust>0 else "賣超偏空", delta_color="normal" if sum_trust>0 else "inverse")
+            col3.metric("近 3 日融資總計 (散戶)", f"{int(sum_margin):,} 張", "散戶進場接刀" if sum_margin>0 else "散戶斷頭停損", delta_color="inverse" if sum_margin>0 else "normal") # 融資增加對籌碼是扣分
+            
+            if sum_foreign > 0 and sum_trust > 0 and sum_margin < 0:
+                st.success("🌟 **【完美籌碼 - 極度集中】**：外資與投信同步買超，且散戶融資大舉退場。籌碼完全落入大戶手中，非常容易拉升，強烈建議偏多操作！")
+            elif (sum_foreign < 0 or sum_trust < 0) and sum_margin > 0:
+                st.error("🚨 **【危險籌碼 - 散戶接刀】**：法人正在高檔倒貨，但散戶卻不斷借錢(融資)進場攤平。上面套牢賣壓極重，強烈建議觀望或避開！")
+            elif sum_trust > 0 and sum_foreign < 0:
+                st.info("🟡 **【土洋對作 - 投信認養】**：外資雖然在賣，但本土投信正在積極護盤或作帳。股價通常會相對抗跌，可觀察投信買超是否延續。")
+            elif sum_foreign > 0 and sum_trust <= 0:
+                st.info("🟡 **【外資單打獨鬥】**：主要靠外資買盤撐場，若是隔日沖外資(如美林、小摩)，須留意隔天早盤可能會有倒貨賣壓。")
+            else:
+                st.warning("📉 **【籌碼渙散】**：法人買盤並不積極，甚至偏向賣方，缺乏推升股價的燃料。")
+
+            st.divider()
+            st.markdown("#### 📋 籌碼流向明細表 (單位: 張)")
+            st.dataframe(
+                chip_df.style.map(
+                    lambda x: 'color: red' if type(x) in [float, int] and x > 0 else ('color: green' if type(x) in [float, int] and x < 0 else ''), 
+                ),
+                use_container_width=True
+            )
+        else:
+            st.error("找不到該股票的近期籌碼資料，可能是今日資料尚未更新或代號錯誤。")
+
+# -------------------------------------------------------------------
+# 分頁 C：當沖開盤環境評估
 # -------------------------------------------------------------------
 elif page == "⚡ 當沖開盤環境評估":
     st.title("⚡ 當沖開盤環境與股性評估")
@@ -320,7 +419,6 @@ elif page == "⚡ 當沖開盤環境評估":
     if st.button("開始評估", type="primary"):
         hist_data, actual_symbol = fetch_stock_history(dt_ticker, period="2mo")
         
-        # 動態抓取股票名稱
         try:
             stock_info = yf.Ticker(actual_symbol).info
             stock_name = stock_info.get('shortName', dt_ticker)
@@ -355,7 +453,6 @@ elif page == "⚡ 當沖開盤環境評估":
             take_profit_price = entry_price + (risk_per_share * 2)
 
             st.divider()
-            # 🔥 新增：醒目的個股操作點位儀表板
             st.markdown(f"### 🎯 【{stock_name}】關鍵操作點位參考")
             c_p, c_e, c_s, c_t = st.columns(4)
             c_p.metric("💰 最新股價", f"{round(latest_close, 2)}")
@@ -364,9 +461,6 @@ elif page == "⚡ 當沖開盤環境評估":
             c_t.metric("🎯 目標停利價", f"{round(take_profit_price, 2)}")
             st.divider()
 
-            # ==========================================
-            # 模式 A：盤前潛力評估
-            # ==========================================
             if "盤前" in eval_mode:
                 st.markdown("### 🌙 盤前選股基因檢測")
                 st.caption("評估依據：最新一個完整交易日的收盤表現。尋找「高振幅、剛爆量、收最高」的當沖絕佳獵物。")
@@ -400,12 +494,9 @@ elif page == "⚡ 當沖開盤環境評估":
                 st.markdown("#### 🎯 盤前系統判定結果：")
                 if atr_pct < 2.0: st.error("❌ **不適合放入自選池**：股性太過牛皮 (振幅 < 2%)，盤中波動極小，當沖極難獲利。")
                 elif vol_ratio >= 1.5 and atr_pct >= 2.5 and k_strength >= 0.7: st.success("🔥 **極佳當沖獵物 (強烈建議加入自選)**：昨日明顯爆量且收在相對高點，加上股性活潑，今日極有可能延續強勢動能！開盤請密切注意是否跳空開高。")
-                elif atr_pct >= 2.5 and k_strength <= 0.3: st.warning("⚠️ **留意隔日沖倒貨賣壓**：股性活潑但昨日收盤偏弱 (留長上影線)。今日早盤若開平低，極易出現失望性賣壓，**較適合伺機做空 (或等急跌有撐後搶反彈)**。")
+                elif atr_pct >= 2.5 and k_strength <= 0.3: st.warning("⚠️ **留意隔日沖倒貨賣壓**：股性活潑但昨日收盤偏弱 (留長上影線)。今日早盤若開平低，極易出現失望性賣壓，較適合伺機做空 (或等急跌有撐後搶反彈)。")
                 else: st.info("🟡 **中性觀察標的**：股性尚可，但量能未明顯爆發或 K線表現平庸，需等開盤後實際動能表態。")
 
-            # ==========================================
-            # 模式 B：開盤後動能評估
-            # ==========================================
             else:
                 st.markdown("### ☀️ 開盤後即時動能掃描")
                 st.caption("評估依據：今日開盤後的即時報價 (API有15分延遲)。確認跳空方向與開盤後多空交戰狀況。")
@@ -441,7 +532,7 @@ elif page == "⚡ 當沖開盤環境評估":
                 else: st.info("🟡 **中性環境 (震盪盤)**：缺乏強烈單向動能。建議觀望或採取「高出低進」打帶跑策略。")
 
 # -------------------------------------------------------------------
-# 分頁 B：市場恐慌指數 (VIX)
+# 分頁 D：市場恐慌指數 (VIX)
 # -------------------------------------------------------------------
 elif page == "😱 市場恐慌指數 (VIX)":
     st.title("😱 市場恐慌指數 (CBOE VIX)")
@@ -478,7 +569,7 @@ elif page == "😱 市場恐慌指數 (VIX)":
         st.line_chart(vix_data[['Close']].rename(columns={'Close': 'VIX 指數'}))
 
 # -------------------------------------------------------------------
-# 分頁 C：個股 K 線與進場分析
+# 分頁 E：個股 K 線與進場分析
 # -------------------------------------------------------------------
 elif page == "🔍 個股 K 線與進場分析":
     st.title("🔍 個股技術分析與策略面板")
@@ -623,19 +714,6 @@ elif page == "🔍 個股 K 線與進場分析":
                 col_t.metric("💰 目標停利價", f"{round(take_profit_price, 2)}", f"+{round(tp_percent, 2)} %", delta_color="normal")
                 
                 st.caption(f"💡 **策略邏輯說明**：若為多頭趨勢，系統會建議在**均線支撐處（MA5 或 MA20）**掛限價單進場，而非盲目追高收盤價。停損與停利皆以此「建議進場價」搭配真實波動幅度 ATR (目前為 {round(latest_atr, 2)}) 進行 1:2 風報比推算，並將虧損風險控制在 10% 以內。")
-
-            st.divider()
-            st.markdown("### 🏦 近 5 日三大法人買賣超 (單位: 張)")
-            inst_df = fetch_institutional(target_ticker)
-            if not inst_df.empty:
-                st.dataframe(
-                    inst_df.style.map(
-                        lambda x: 'color: red' if type(x) in [float, int] and x > 0 else ('color: green' if type(x) in [float, int] and x < 0 else ''), 
-                    ),
-                    use_container_width=True
-                )
-            else:
-                st.info("💡 目前無近期的三大法人資料，或今日資料尚未更新 (資料來源: FinMind)。")
 
         else:
             st.error("找不到該股票代號的資料，請確認代號是否正確。")
