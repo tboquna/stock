@@ -4,6 +4,8 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from streamlit_gsheets import GSheetsConnection
+import requests
+from datetime import datetime, timedelta
 
 # 網頁基本設定
 st.set_page_config(page_title="台股持股監控面板", page_icon="📈", layout="wide")
@@ -57,6 +59,44 @@ def fetch_stock_history(ticker, period="6mo"):
     except Exception:
         pass
     return None, None
+
+# 🔥 新增：抓取三大法人買賣超資料 (透過 FinMind)
+@st.cache_data(ttl=3600)
+def fetch_institutional(ticker):
+    start_date = (datetime.now() - timedelta(days=15)).strftime("%Y-%m-%d")
+    url = "https://api.finmindtrade.com/api/v4/data"
+    params = {
+        "dataset": "TaiwanStockInstitutionalInvestorsBuySell",
+        "data_id": str(ticker),
+        "start_date": start_date
+    }
+    try:
+        res = requests.get(url, params=params, timeout=5)
+        data = res.json()
+        if data.get("msg") == "success" and len(data.get("data", [])) > 0:
+            df = pd.DataFrame(data["data"])
+            df['net'] = df['buy'] - df['sell']
+            name_map = {
+                "Foreign_Investor": "外資",
+                "Investment_Trust": "投信",
+                "Dealer_self": "自營商(自有)",
+                "Dealer_Hedging": "自營商(避險)"
+            }
+            df['name'] = df['name'].map(name_map).fillna(df['name'])
+            pivot_df = df.pivot_table(index='date', columns='name', values='net', aggfunc='sum').fillna(0)
+            pivot_df = pivot_df.sort_index(ascending=False).head(5)
+            # 轉換為張數
+            pivot_df = (pivot_df / 1000).round(0).astype(int)
+            pivot_df['三大法人合計'] = pivot_df.sum(axis=1)
+            
+            cols = pivot_df.columns.tolist()
+            if '三大法人合計' in cols:
+                cols.remove('三大法人合計')
+                cols.append('三大法人合計')
+            return pivot_df[cols]
+    except:
+        pass
+    return pd.DataFrame()
 
 # -------------------------------------------------------------------
 # 分頁 A：個人持股監控
@@ -246,7 +286,6 @@ if page == "📊 個人持股監控":
         df_display = df.drop(columns=["_raw_value"], errors='ignore')
         
         st.markdown("### 📋 持股與佈局明細")
-        # 🔥 改用 st.table，表格會全部展開，不需要捲動條
         st.table(
             df_display.style.map(
                 lambda x: 'color: red' if type(x) in [float, int] and x > 0 else ('color: green' if type(x) in [float, int] and x < 0 else ''), 
@@ -387,9 +426,6 @@ elif page == "🔍 個股 K 線與進場分析":
             
             st.plotly_chart(fig, use_container_width=True)
 
-            # ==========================================
-            # 🔥 全新升級：策略計畫與邏輯核心 (均線限價單版本)
-            # ==========================================
             st.markdown("### 🤖 系統技術面與進出場策略")
             
             if pd.isna(latest_ma20) or pd.isna(latest_atr):
@@ -440,6 +476,23 @@ elif page == "🔍 個股 K 線與進場分析":
                 col_t.metric("💰 目標停利價", f"{round(take_profit_price, 2)}", f"+{round(tp_percent, 2)} %", delta_color="normal")
                 
                 st.caption(f"💡 **策略邏輯說明**：若為多頭趨勢，系統會建議在**均線支撐處（MA5 或 MA20）**掛限價單進場，而非盲目追高收盤價。停損與停利皆以此「建議進場價」搭配真實波動幅度 ATR (目前為 {round(latest_atr, 2)}) 進行 1:2 風報比推算，並將虧損風險控制在 10% 以內。")
+
+            # ==========================================
+            # 🔥 新增：三大法人買賣超區塊
+            # ==========================================
+            st.divider()
+            st.markdown("### 🏦 近 5 日三大法人買賣超 (單位: 張)")
+            inst_df = fetch_institutional(target_ticker)
+            if not inst_df.empty:
+                # 台股慣例：買超為紅字，賣超為綠字
+                st.dataframe(
+                    inst_df.style.map(
+                        lambda x: 'color: red' if type(x) in [float, int] and x > 0 else ('color: green' if type(x) in [float, int] and x < 0 else ''), 
+                    ),
+                    use_container_width=True
+                )
+            else:
+                st.info("💡 目前無近期的三大法人資料，或今日資料尚未更新 (資料來源: FinMind)。")
 
         else:
             st.error("找不到該股票代號的資料，請確認代號是否正確。")
