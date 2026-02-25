@@ -6,7 +6,7 @@ from plotly.subplots import make_subplots
 from streamlit_gsheets import GSheetsConnection
 
 # 網頁基本設定
-st.set_page_config(page_title="台股持股監控面板", page_icon="", layout="wide")
+st.set_page_config(page_title="台股持股監控面板", page_icon="📈", layout="wide")
 
 # ==========================================
 # 1. 建立 Google Sheets 連線與資料初始化
@@ -98,25 +98,19 @@ if page == "📊 個人持股監控":
                     except: pass
                     st.rerun()
 
-    # --- 修改 / 刪除持股 ---
     with st.sidebar.expander("✏️ 修改 / 🗑️ 刪除持股", expanded=True):
         if len(st.session_state.portfolio) > 0:
-            
-            # 1. 背後選項清單：只存股票代號
             ticker_options = [item['股票代號'] for item in st.session_state.portfolio]
             
-            # 2. 建立一個轉換函式：用代號去找出股票名稱來顯示
             def get_stock_name(ticker):
                 for item in st.session_state.portfolio:
                     if item["股票代號"] == ticker:
                         name = item.get("股票名稱", "")
-                        # 防呆：如果 Google 試算表名稱欄位空白 (NaN)，就顯示代號就好
                         if pd.isna(name) or str(name).strip() == "" or str(name).lower() == "nan":
                             return str(ticker)
                         return str(name)
                 return str(ticker)
 
-            # 3. 加上 format_func，這樣選單就只會顯示乾淨的「股票名稱」了！
             selected_ticker = st.selectbox("選擇要操作的股票", ticker_options, format_func=get_stock_name)
             
             current_item = next(item for item in st.session_state.portfolio if item["股票代號"] == selected_ticker)
@@ -165,8 +159,8 @@ if page == "📊 個人持股監控":
 
     portfolio_data = []
     total_cost = total_value = 0
-    total_buy_cash = 0  # 🔥 買進需投入資金
-    total_sell_cash = 0 # 🔥 賣出可變現資金
+    total_buy_cash = 0
+    total_sell_cash = 0
 
     for item in filtered_portfolio:
         hist, _ = fetch_stock_history(item["股票代號"], period="1d")
@@ -177,7 +171,6 @@ if page == "📊 個人持股監控":
         profit = value - cost
         profit_percent = (profit / cost * 100) if cost > 0 else 0
         
-        # 🔥 計算買賣差額邏輯
         target_shares = item.get("目標股數", item["持有股數"])
         diff_shares = target_shares - item["持有股數"]
         
@@ -201,7 +194,7 @@ if page == "📊 個人持股監控":
         portfolio_data.append({
             "群組": item["群組"], "代號": item["股票代號"], "名稱": item["股票名稱"], 
             "持有(股)": item["持有股數"], "目標(股)": target_shares, 
-            "調整動作": action_str, "預估資金變動": cash_str,  # 🔥 新增這兩欄
+            "調整動作": action_str, "預估資金變動": cash_str,
             "均價": item["平均成本"], "現價": current_price if current_price else "無資料",
             "總成本": f"{int(cost):,}", "總現值": f"{int(value):,}", 
             "未實現損益": f"{int(profit):,}", "報酬率 (%)": round(profit_percent, 2),
@@ -223,7 +216,6 @@ if page == "📊 個人持股監控":
         c3.metric(f"{selected_filter} - 未實現損益", f"${int(total_profit):,}", f"{round(total_profit_percent, 2)} %")
         c4.metric("🛒 預估需投入資金", f"${int(total_buy_cash):,}", delta_color="off")
         
-        # 🔥 新增：預估變現金額顯示
         st.metric("💰 預估可收回現金 (減碼/賣出)", f"${int(total_sell_cash):,}", delta_color="normal")
         
     with col_chart:
@@ -254,12 +246,12 @@ if page == "📊 個人持股監控":
         df_display = df.drop(columns=["_raw_value"], errors='ignore')
         
         st.markdown("### 📋 持股與佈局明細")
-        st.dataframe(
+        # 🔥 改用 st.table，表格會全部展開，不需要捲動條
+        st.table(
             df_display.style.map(
                 lambda x: 'color: red' if type(x) in [float, int] and x > 0 else ('color: green' if type(x) in [float, int] and x < 0 else ''), 
                 subset=["報酬率 (%)"]
-            ), 
-            width='stretch'
+            )
         )
 
 # -------------------------------------------------------------------
@@ -314,11 +306,9 @@ elif page == "🔍 個股 K 線與進場分析":
         hist_data, actual_symbol = fetch_stock_history(target_ticker, period=period_option)
         
         if hist_data is not None:
-            # 計算基礎均線
             hist_data['MA5'] = hist_data['Close'].rolling(window=5).mean()
             hist_data['MA20'] = hist_data['Close'].rolling(window=20).mean()
             
-            # 🔥 補回這兩個變數的定義，供後方策略計算使用
             latest_ma5 = hist_data['MA5'].iloc[-1]
             latest_ma20 = hist_data['MA20'].iloc[-1]
             
@@ -326,14 +316,12 @@ elif page == "🔍 個股 K 線與進場分析":
             latest_open, latest_high, latest_low, latest_close = hist_data['Open'].iloc[-1], hist_data['High'].iloc[-1], hist_data['Low'].iloc[-1], hist_data['Close'].iloc[-1]
             latest_volume = int(hist_data['Volume'].iloc[-1])
             
-            # 計算 MACD
             exp1 = hist_data['Close'].ewm(span=12, adjust=False).mean()
             exp2 = hist_data['Close'].ewm(span=26, adjust=False).mean()
             hist_data['MACD'] = exp1 - exp2
             hist_data['Signal'] = hist_data['MACD'].ewm(span=9, adjust=False).mean()
             hist_data['MACD_Hist'] = hist_data['MACD'] - hist_data['Signal']
             
-            # 計算 RSI
             delta = hist_data['Close'].diff()
             up = delta.clip(lower=0)
             down = -1 * delta.clip(upper=0)
@@ -342,7 +330,6 @@ elif page == "🔍 個股 K 線與進場分析":
             rs = ema_up / ema_down
             hist_data['RSI'] = 100 - (100 / (1 + rs))
 
-            # === 新增：計算 ATR (14日真實波動幅度) ===
             hist_data['H-L'] = hist_data['High'] - hist_data['Low']
             hist_data['H-PC'] = abs(hist_data['High'] - hist_data['Close'].shift(1))
             hist_data['L-PC'] = abs(hist_data['Low'] - hist_data['Close'].shift(1))
@@ -350,7 +337,6 @@ elif page == "🔍 個股 K 線與進場分析":
             hist_data['ATR'] = hist_data['TR'].rolling(window=14).mean()
             latest_atr = hist_data['ATR'].iloc[-1]
 
-            # --- 顯示最新日資訊 ---
             st.markdown(f"### 📅 最新交易日資訊 ({latest_date})")
             if len(hist_data) > 1:
                 price_change = latest_close - hist_data['Close'].iloc[-2]
@@ -365,7 +351,6 @@ elif page == "🔍 個股 K 線與進場分析":
             m5.metric("成交量 (股)", f"{latest_volume:,}")
             st.divider()
 
-            # --- 繪製圖表 ---
             num_rows = 2 + len(selected_indicators)
             row_heights = [0.5, 0.2]
             if len(selected_indicators) == 1: row_heights.append(0.3)
@@ -403,17 +388,51 @@ elif page == "🔍 個股 K 線與進場分析":
             st.plotly_chart(fig, use_container_width=True)
 
             # ==========================================
-            # 🔥 全新升級：策略計畫與邏輯核心
-            # ==========================================
-            # ==========================================
             # 🔥 全新升級：策略計畫與邏輯核心 (均線限價單版本)
             # ==========================================
-           st.markdown("#### 🎯 動態波動防護模型 (風報比 1:2)")
+            st.markdown("### 🤖 系統技術面與進出場策略")
+            
+            if pd.isna(latest_ma20) or pd.isna(latest_atr):
+                st.warning("資料量不足以計算技術指標，請選擇更長的期間。")
+            else:
+                if latest_close > latest_ma20 and latest_ma5 > latest_ma20:
+                    trend_status = "📈 **強勢多頭** (站上月線且短均線大於長均線)"
+                    entry_advice = "多方控盤。建議在股價量縮回測 MA5 (週線) 不破時進場。"
+                    entry_price = latest_ma5
+                    entry_label = "📍 建議進場價 (回測週線)"
+                elif latest_close > latest_ma20 and latest_ma5 <= latest_ma20:
+                    trend_status = "🪀 **反彈震盪** (站上月線，但短線尚未完全轉強)"
+                    entry_advice = "屬於築底反彈階段，密切觀察 MA20 是否能確實守住轉為支撐。"
+                    entry_price = latest_ma20
+                    entry_label = "📍 建議進場價 (月線支撐)"
+                elif latest_close <= latest_ma20 and latest_ma5 > latest_ma20:
+                    trend_status = "⚠️ **短線轉弱** (跌破月線，但均線格局仍偏多)"
+                    entry_advice = "跌破重要支撐！建議暫時觀望，確認重新站回 MA20 月線後再考慮。"
+                    entry_price = latest_close
+                    entry_label = "📍 試算基準 (建議觀望)"
+                else:
+                    trend_status = "📉 **弱勢空頭** (跌破月線且均線空頭排列)"
+                    entry_advice = "目前長線趨勢向下，上檔套牢壓力沉重。強烈建議「不要進場接刀」。"
+                    entry_price = latest_close
+                    entry_label = "📍 試算基準 (強烈觀望)"
+
+                st.info(f"**目前盤勢：** {trend_status}  \n**操作建議：** {entry_advice}")
+
+                recent_10d_low = hist_data['Low'].tail(10).min()
+                atr_stop = entry_price - (1.5 * latest_atr)
+                stop_loss_price = min(recent_10d_low, atr_stop) 
+                
+                if (entry_price - stop_loss_price) / entry_price > 0.1: 
+                    stop_loss_price = entry_price * 0.90
+                
+                risk_per_share = entry_price - stop_loss_price
+                take_profit_price = entry_price + (risk_per_share * 2)
+                
+                st.markdown("#### 🎯 動態波動防護模型 (風報比 1:2)")
                 col_e, col_s, col_t = st.columns(3)
                 
                 col_e.metric(entry_label, f"{round(entry_price, 2)}")
                 
-                # 這裡的 % 數也改用 entry_price 去計算，才能精準算出真實風報比
                 sl_percent = ((stop_loss_price - entry_price) / entry_price) * 100
                 col_s.metric("🛡️ 建議停損價 (防甩轎)", f"{round(stop_loss_price, 2)}", f"{round(sl_percent, 2)} %", delta_color="off")
                 
