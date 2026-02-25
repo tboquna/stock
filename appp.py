@@ -43,7 +43,6 @@ for item in st.session_state.portfolio:
 # 2. 側邊欄 (Sidebar) - 分頁導覽
 # ==========================================
 st.sidebar.title("🧭 網站導覽")
-# 🔥 新增了當沖評估的分頁
 page = st.sidebar.radio("選擇頁面", ["📊 個人持股監控", "⚡ 當沖開盤環境評估", "😱 市場恐慌指數 (VIX)", "🔍 個股 K 線與進場分析"])
 st.sidebar.divider()
 
@@ -293,76 +292,122 @@ if page == "📊 個人持股監控":
         )
 
 # -------------------------------------------------------------------
-# 🔥 全新分頁：當沖開盤環境評估
+# 🔥 全新分頁：當沖開盤環境評估 (加入雙模式切換)
 # -------------------------------------------------------------------
 elif page == "⚡ 當沖開盤環境評估":
     st.title("⚡ 當沖開盤環境與股性評估")
-    st.markdown("⚠️ **注意**：免費 API 報價有 15~20 分鐘延遲。本頁面專門用來在「開盤後」評估該檔股票今日的**跳空動能**與**近期股性**，判斷是否具備當沖（Day Trading）的先天條件。")
+    
+    # 🔥 新增雙模式切換器
+    eval_mode = st.radio("請選擇評估模式：", 
+                         ["🌙 盤前潛力評估 (前一交易日資料，適合 09:00 前使用)", 
+                          "☀️ 開盤後動能評估 (今日即時資料，適合 09:15 後使用)"], 
+                         horizontal=True)
     
     dt_ticker = st.text_input("輸入要評估的股票代號", value="2330", placeholder="例如: 2330")
     
-    if st.button("開始評估股性", type="primary"):
-        hist_data, actual_symbol = fetch_stock_history(dt_ticker, period="1mo")
+    if st.button("開始評估", type="primary"):
+        hist_data, actual_symbol = fetch_stock_history(dt_ticker, period="2mo")
         
-        if hist_data is not None and len(hist_data) >= 2:
-            # 取得昨日與今日(或最新)資料
-            yesterday_data = hist_data.iloc[-2]
-            today_data = hist_data.iloc[-1]
-            
-            y_close = yesterday_data['Close']
-            t_open = today_data['Open']
-            t_current = today_data['Close']
-            t_high = today_data['High']
-            t_low = today_data['Low']
-            
-            # 1. 計算跳空幅度 (Gap)
-            gap_pct = ((t_open - y_close) / y_close) * 100
-            
-            # 2. 計算近期 ATR (14日平均真實波動幅度) 與 振幅比率
+        if hist_data is not None and len(hist_data) >= 5:
+            # 計算基礎共用指標 (ATR 與均量)
             hist_data['H-L'] = hist_data['High'] - hist_data['Low']
             hist_data['H-PC'] = abs(hist_data['High'] - hist_data['Close'].shift(1))
             hist_data['L-PC'] = abs(hist_data['Low'] - hist_data['Close'].shift(1))
             hist_data['TR'] = hist_data[['H-L', 'H-PC', 'L-PC']].max(axis=1)
-            atr_14 = hist_data['TR'].rolling(14).mean().iloc[-1]
-            atr_pct = (atr_14 / t_current) * 100  # 股性活潑度
-            
-            # 3. 計算今日早盤強弱 (現價與開盤價比較)
-            intraday_pct = ((t_current - t_open) / t_open) * 100
+            hist_data['ATR_14'] = hist_data['TR'].rolling(14).mean()
+            hist_data['Vol_5MA'] = hist_data['Volume'].rolling(5).mean()
             
             st.divider()
-            col1, col2, col3 = st.columns(3)
-            
-            # --- 指標 1: 跳空動能 ---
-            gap_color = "normal" if gap_pct >= 0 else "inverse"
-            col1.metric("🚀 今日開盤跳空", f"{round(t_open, 2)}", f"{round(gap_pct, 2)} %", delta_color=gap_color)
-            
-            # --- 指標 2: 股性活潑度 ---
-            atr_status = "🔥 活潑" if atr_pct >= 2.5 else "🐢 牛皮"
-            col2.metric(f"📊 股性活潑度 (ATR%) - {atr_status}", f"{round(atr_14, 2)} 元", f"均振幅 {round(atr_pct, 2)} %", delta_color="off")
-            
-            # --- 指標 3: 盤中動能 ---
-            intra_color = "normal" if intraday_pct >= 0 else "inverse"
-            intra_status = "開高走高" if intraday_pct > 0 else ("開平盤" if intraday_pct == 0 else "開高走低 (注意A轉)")
-            col3.metric(f"🥊 早盤多空交戰", f"{round(t_current, 2)}", f"距開盤 {round(intraday_pct, 2)} % ({intra_status})", delta_color=intra_color)
-            
-            st.markdown("### 📝 系統當沖綜合判定")
-            
-            # 綜合判定邏輯
-            if atr_pct < 2.0:
-                st.error("❌ **不建議當沖 (無肉可吃)**：這檔股票近期的平均振幅不到 2%，盤中波動太小。扣掉當沖的手續費與交易稅後，幾乎沒有獲利空間，容易做白工。")
-            elif gap_pct > 4.5:
-                st.warning("⚠️ **高風險 (留意 A 轉倒貨)**：今日跳空幅度過大 (超過 4.5%)，雖然強勢，但也代表昨天買的人已經獲利豐厚。如果早盤跌破開盤價，極度容易引發「人踩人」的停損賣壓。若要做多，停損必須抓極短。")
-            elif gap_pct <= 0 and intraday_pct < 0:
-                st.warning("📉 **弱勢盤整 (偏空)**：跳空開低且盤中持續走低，今日多方完全棄守。不適合做多，若想嘗試做空，請以「今日高點」作為絕對停損。")
-            elif 1.0 <= gap_pct <= 4.0 and intraday_pct >= 0 and atr_pct >= 2.5:
-                st.success("✅ **當沖絕佳環境 (順勢做多)**：跳空 1%~4% 是最棒的表態區間，且開盤後維持在開盤價之上 (未 A 轉)，加上股性活潑 (振幅>2.5%)。建議可以等待「量縮回測開盤價或 VWAP」不破時，嘗試切入做多。")
-            else:
-                st.info("🟡 **中性環境 (震盪盤)**：目前缺乏強烈的多空單向動能，可能是狹幅震盪。當沖難度較高，建議觀望或縮小部位，採取「高出低進」的打帶跑策略。")
 
-            st.caption("💡 **當沖鐵律**：無論系統判定環境多好，當沖的靈魂在於「嚴格停損」。買進後若跌破前一波低點或今日開盤價，請毫不猶豫砍單；13:25 前無論賺賠務必全數平倉出場。")
-            
-        else:
-            st.error("資料獲取失敗，請確認代號是否正確。")
+            # ==========================================
+            # 模式 A：盤前潛力評估 (看最後一個完整交易日)
+            # ==========================================
+            if "盤前" in eval_mode:
+                st.markdown("### 🌙 盤前選股基因檢測")
+                st.caption("評估依據：最新一個完整交易日的收盤表現。尋找「高振幅、剛爆量、收最高」的當沖絕佳獵物。")
+                
+                # 取最後一筆資料 (因為盤前，最新的資料就是昨天的收盤)
+                target_day = hist_data.iloc[-1]
+                t_close = target_day['Close']
+                t_open = target_day['Open']
+                t_high = target_day['High']
+                t_low = target_day['Low']
+                t_vol = target_day['Volume']
+                
+                # 指標計算
+                atr_pct = (target_day['ATR_14'] / t_close) * 100
+                vol_ratio = t_vol / target_day['Vol_5MA'] if target_day['Vol_5MA'] > 0 else 1
+                
+                # 計算 K 線實體與留影線狀況 (0~1之間，1代表收在最高點)
+                if t_high != t_low:
+                    k_strength = (t_close - t_low) / (t_high - t_low)
+                else:
+                    k_strength = 0.5
+
+                col1, col2, col3 = st.columns(3)
+                
+                atr_color = "normal" if atr_pct >= 2.5 else "inverse"
+                col1.metric("📊 股性活潑度 (ATR%)", f"{round(atr_pct, 2)} %", "大於 2.5% 才適合當沖", delta_color=atr_color)
+                
+                vol_color = "normal" if vol_ratio >= 1.5 else "off"
+                vol_status = "🔥 爆量人氣股" if vol_ratio >= 1.5 else "平穩量"
+                col2.metric("💥 近期量能放大倍數", f"{round(vol_ratio, 1)} 倍", vol_status, delta_color=vol_color)
+                
+                k_color = "normal" if k_strength >= 0.7 else ("inverse" if k_strength <= 0.3 else "off")
+                k_status = "強勢收高" if k_strength >= 0.7 else ("弱勢收低" if k_strength <= 0.3 else "長上影線/十字線")
+                col3.metric("📈 K線收盤位置", f"{round(k_strength*100, 1)} %", k_status, delta_color=k_color)
+                
+                st.markdown("#### 🎯 盤前系統判定結果：")
+                if atr_pct < 2.0:
+                    st.error("❌ **不適合放入自選池**：股性太過牛皮 (振幅 < 2%)，盤中波動極小，當沖極難獲利。")
+                elif vol_ratio >= 1.5 and atr_pct >= 2.5 and k_strength >= 0.7:
+                    st.success("🔥 **極佳當沖獵物 (強烈建議加入自選)**：昨日明顯爆量且收在相對高點，加上股性活潑，今日極有可能延續強勢動能！開盤請密切注意是否跳空開高。")
+                elif atr_pct >= 2.5 and k_strength <= 0.3:
+                    st.warning("⚠️ **留意隔日沖倒貨賣壓**：股性活潑但昨日收盤偏弱 (留長上影線)。今日早盤若開平低，極易出現失望性賣壓，**較適合伺機做空 (或等急跌有撐後搶反彈)**。")
+                else:
+                    st.info("🟡 **中性觀察標的**：股性尚可，但量能未明顯爆發或 K 線表現平庸，需等開盤後實際動能(跳空幅度)表態才能確認方向。")
+
+            # ==========================================
+            # 模式 B：開盤後動能評估 (原有的即時邏輯)
+            # ==========================================
+            else:
+                st.markdown("### ☀️ 開盤後即時動能掃描")
+                st.caption("評估依據：今日開盤後的即時報價 (API有15分延遲)。確認跳空方向與開盤後多空交戰狀況。")
+                
+                yesterday_data = hist_data.iloc[-2]
+                today_data = hist_data.iloc[-1]
+                
+                y_close = yesterday_data['Close']
+                t_open = today_data['Open']
+                t_current = today_data['Close']
+                
+                gap_pct = ((t_open - y_close) / y_close) * 100
+                atr_pct = (today_data['ATR_14'] / t_current) * 100
+                intraday_pct = ((t_current - t_open) / t_open) * 100
+                
+                col1, col2, col3 = st.columns(3)
+                
+                gap_color = "normal" if gap_pct >= 0 else "inverse"
+                col1.metric("🚀 今日開盤跳空", f"{round(t_open, 2)}", f"{round(gap_pct, 2)} %", delta_color=gap_color)
+                
+                atr_status = "🔥 活潑" if atr_pct >= 2.5 else "🐢 牛皮"
+                col2.metric(f"📊 股性活潑度 (ATR%)", f"{round(today_data['ATR_14'], 2)} 元", f"均振幅 {round(atr_pct, 2)} % ({atr_status})", delta_color="off")
+                
+                intra_color = "normal" if intraday_pct >= 0 else "inverse"
+                intra_status = "開高走高" if intraday_pct > 0 else ("開平盤" if intraday_pct == 0 else "開高走低 (注意A轉)")
+                col3.metric(f"🥊 早盤多空交戰", f"{round(t_current, 2)}", f"距開盤 {round(intraday_pct, 2)} % ({intra_status})", delta_color=intra_color)
+                
+                st.markdown("#### 🎯 盤中系統判定結果：")
+                if atr_pct < 2.0:
+                    st.error("❌ **不建議當沖 (無肉可吃)**：這檔股票近期的平均振幅不到 2%，幾乎沒有獲利空間。")
+                elif gap_pct > 4.5:
+                    st.warning("⚠️ **高風險 (留意 A 轉倒貨)**：跳空幅度過大，若早盤跌破開盤價，極易引發停損賣壓。若要做多，停損必須抓極短。")
+                elif gap_pct <= 0 and intraday_pct < 0:
+                    st.warning("📉 **弱勢盤整 (偏空)**：跳空開低且盤中持續走低。不適合做多，若嘗試做空請以「今日高點」為絕對停損。")
+                elif 1.0 <= gap_pct <= 4.0 and intraday_pct >= 0 and atr_pct >= 2.5:
+                    st.success("✅ **當沖絕佳環境 (順勢做多)**：跳空 1%~4% 且未 A 轉，股性活潑。建議等待「量縮回測開盤價或 VWAP」不破時切入。")
+                else:
+                    st.info("🟡 **中性環境 (震盪盤)**：缺乏強烈單向動能。建議觀望或採取「高出低進」打帶跑策略。")
 
 # -------------------------------------------------------------------
 # 分頁 B：市場恐慌指數 (VIX)
