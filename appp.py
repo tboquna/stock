@@ -201,44 +201,9 @@ if page == "📊 個人持股監控":
     total_sell_cash = 0
 
     for item in filtered_portfolio:
-        # 🔥 拉長讀取期間以計算均線與ATR
-        hist, _ = fetch_stock_history(item["股票代號"], period="2mo")
-        current_price = 0
-        entry_str = sl_str = tp_str = "無"
-        
-        if hist is not None and not hist.empty:
-            current_price = round(hist['Close'].iloc[-1], 2)
-            
-            # 🔥 自動計算清單中每一檔的適合進場價、停損與停利
-            if len(hist) >= 20:
-                hist['MA5'] = hist['Close'].rolling(window=5).mean()
-                hist['MA20'] = hist['Close'].rolling(window=20).mean()
-                hist['H-L'] = hist['High'] - hist['Low']
-                hist['H-PC'] = abs(hist['High'] - hist['Close'].shift(1))
-                hist['L-PC'] = abs(hist['Low'] - hist['Close'].shift(1))
-                hist['TR'] = hist[['H-L', 'H-PC', 'L-PC']].max(axis=1)
-                hist['ATR'] = hist['TR'].rolling(window=14).mean()
-                
-                latest_ma5 = hist['MA5'].iloc[-1]
-                latest_ma20 = hist['MA20'].iloc[-1]
-                latest_atr = hist['ATR'].iloc[-1]
-                recent_10d_low = hist['Low'].tail(10).min()
-                
-                if current_price > latest_ma20 and latest_ma5 > latest_ma20: entry_price = latest_ma5
-                elif current_price > latest_ma20 and latest_ma5 <= latest_ma20: entry_price = latest_ma20
-                else: entry_price = current_price
-                    
-                atr_stop = entry_price - (1.5 * latest_atr)
-                stop_loss_price = min(recent_10d_low, atr_stop) 
-                if (entry_price - stop_loss_price) / entry_price > 0.1: 
-                    stop_loss_price = entry_price * 0.90
-                
-                risk_per_share = entry_price - stop_loss_price
-                take_profit_price = entry_price + (risk_per_share * 2)
-                
-                entry_str = f"{round(entry_price, 2)}"
-                sl_str = f"{round(stop_loss_price, 2)}"
-                tp_str = f"{round(take_profit_price, 2)}"
+        # 🔥 還原為 1d，加快讀取速度，不計算額外技術指標
+        hist, _ = fetch_stock_history(item["股票代號"], period="1d")
+        current_price = round(hist['Close'].iloc[-1], 2) if hist is not None else 0
         
         cost = item["平均成本"] * item["持有股數"]
         value = current_price * item["持有股數"] if current_price else 0
@@ -265,19 +230,16 @@ if page == "📊 個人持股監控":
         total_cost += cost
         total_value += value
         
-        # 🔥 將點位加入表格中 (移除部分較不重要的總額欄位以節省空間)
+        # 🔥 乾淨清爽的表格，保留「成本價」
         portfolio_data.append({
             "群組": item["群組"], 
             "代號": item["股票代號"], 
             "名稱": item["股票名稱"], 
+            "成本價": item["平均成本"], 
             "現價": current_price if current_price else "無資料",
-            "進場價": entry_str,
-            "停損": sl_str,
-            "停利": tp_str,
             "持有(股)": item["持有股數"], 
             "目標(股)": target_shares, 
             "動作": action_str, 
-            "均價": item["平均成本"], 
             "未實現損益": f"{int(profit):,}", 
             "報酬率(%)": round(profit_percent, 2),
             "_raw_value": value 
@@ -327,7 +289,7 @@ if page == "📊 個人持股監控":
         df = pd.DataFrame(portfolio_data)
         df_display = df.drop(columns=["_raw_value"], errors='ignore')
         
-        st.markdown("### 📋 持股與操作計畫明細")
+        st.markdown("### 📋 持股與佈局明細")
         st.table(
             df_display.style.map(
                 lambda x: 'color: red' if type(x) in [float, int] and x > 0 else ('color: green' if type(x) in [float, int] and x < 0 else ''), 
@@ -336,7 +298,7 @@ if page == "📊 個人持股監控":
         )
 
 # -------------------------------------------------------------------
-# 🔥 全新分頁：當沖開盤環境評估 (加入雙模式切換 + 點位面板)
+# 🔥 全新分頁：當沖開盤環境評估 (包含頂部操作點位面板)
 # -------------------------------------------------------------------
 elif page == "⚡ 當沖開盤環境評估":
     st.title("⚡ 當沖開盤環境與股性評估")
@@ -351,7 +313,7 @@ elif page == "⚡ 當沖開盤環境評估":
     if st.button("開始評估", type="primary"):
         hist_data, actual_symbol = fetch_stock_history(dt_ticker, period="2mo")
         
-        # 🔥 動態抓取股票名稱
+        # 動態抓取股票名稱
         try:
             stock_info = yf.Ticker(actual_symbol).info
             stock_name = stock_info.get('shortName', dt_ticker)
@@ -670,3 +632,4 @@ elif page == "🔍 個股 K 線與進場分析":
 
         else:
             st.error("找不到該股票代號的資料，請確認代號是否正確。")
+            
