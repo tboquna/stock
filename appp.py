@@ -314,19 +314,26 @@ elif page == "🔍 個股 K 線與進場分析":
         hist_data, actual_symbol = fetch_stock_history(target_ticker, period=period_option)
         
         if hist_data is not None:
+            # 計算基礎均線
             hist_data['MA5'] = hist_data['Close'].rolling(window=5).mean()
             hist_data['MA20'] = hist_data['Close'].rolling(window=20).mean()
+            
+            # 🔥 補回這兩個變數的定義，供後方策略計算使用
+            latest_ma5 = hist_data['MA5'].iloc[-1]
+            latest_ma20 = hist_data['MA20'].iloc[-1]
             
             latest_date = hist_data.index[-1].strftime("%Y-%m-%d")
             latest_open, latest_high, latest_low, latest_close = hist_data['Open'].iloc[-1], hist_data['High'].iloc[-1], hist_data['Low'].iloc[-1], hist_data['Close'].iloc[-1]
             latest_volume = int(hist_data['Volume'].iloc[-1])
             
+            # 計算 MACD
             exp1 = hist_data['Close'].ewm(span=12, adjust=False).mean()
             exp2 = hist_data['Close'].ewm(span=26, adjust=False).mean()
             hist_data['MACD'] = exp1 - exp2
             hist_data['Signal'] = hist_data['MACD'].ewm(span=9, adjust=False).mean()
             hist_data['MACD_Hist'] = hist_data['MACD'] - hist_data['Signal']
             
+            # 計算 RSI
             delta = hist_data['Close'].diff()
             up = delta.clip(lower=0)
             down = -1 * delta.clip(upper=0)
@@ -334,7 +341,8 @@ elif page == "🔍 個股 K 線與進場分析":
             ema_down = down.ewm(com=13, adjust=False).mean()
             rs = ema_up / ema_down
             hist_data['RSI'] = 100 - (100 / (1 + rs))
-# === 新增：計算 ATR (14日真實波動幅度) ===
+
+            # === 新增：計算 ATR (14日真實波動幅度) ===
             hist_data['H-L'] = hist_data['High'] - hist_data['Low']
             hist_data['H-PC'] = abs(hist_data['High'] - hist_data['Close'].shift(1))
             hist_data['L-PC'] = abs(hist_data['Low'] - hist_data['Close'].shift(1))
@@ -447,3 +455,5 @@ elif page == "🔍 個股 K 線與進場分析":
                 col_t.metric("💰 目標停利價", f"{round(take_profit_price, 2)}", f"+{round(tp_percent, 2)} %", delta_color="normal")
                 
                 st.caption(f"💡 **策略邏輯說明**：系統計算出該檔股票近期的平均真實波動幅度 (ATR) 為 **{round(latest_atr, 2)}** 元。停損價設定為避開日常雜訊的「動態防守位置」並結合「近10日低點」，且強制將單筆最大虧損風險控制在 10% 以內。")
+        else:
+            st.error("找不到該股票代號的資料，請確認代號是否正確。")
