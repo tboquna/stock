@@ -46,18 +46,27 @@ st.sidebar.title("🧭 網站導覽")
 page = st.sidebar.radio("選擇頁面", ["📊 個人持股監控", "⚡ 當沖開盤環境評估", "😱 市場恐慌指數 (VIX)", "🔍 個股 K 線與進場分析"])
 st.sidebar.divider()
 
+# 🔥 修復：獨立拆分上市與上櫃的查詢防護網
 @st.cache_data(ttl=60)
 def fetch_stock_history(ticker, period="6mo"):
+    # 先嘗試上市 (.TW)
     try:
         stock = yf.Ticker(f"{ticker}.TW")
         hist = stock.history(period=period)
-        if not hist.empty: return hist, f"{ticker}.TW"
-        
-        stock_otc = yf.Ticker(f"{ticker}.TWO")
-        hist_otc = stock_otc.history(period=period)
-        if not hist_otc.empty: return hist_otc, f"{ticker}.TWO"
+        if not hist.empty: 
+            return hist, f"{ticker}.TW"
     except Exception:
         pass
+        
+    # 如果上市找不到或報錯，再嘗試上櫃 (.TWO)
+    try:
+        stock_otc = yf.Ticker(f"{ticker}.TWO")
+        hist_otc = stock_otc.history(period=period)
+        if not hist_otc.empty: 
+            return hist_otc, f"{ticker}.TWO"
+    except Exception:
+        pass
+        
     return None, None
 
 @st.cache_data(ttl=3600)
@@ -201,7 +210,6 @@ if page == "📊 個人持股監控":
     total_sell_cash = 0
 
     for item in filtered_portfolio:
-        # 🔥 還原為 1d，加快讀取速度，不計算額外技術指標
         hist, _ = fetch_stock_history(item["股票代號"], period="1d")
         current_price = round(hist['Close'].iloc[-1], 2) if hist is not None else 0
         
@@ -230,7 +238,6 @@ if page == "📊 個人持股監控":
         total_cost += cost
         total_value += value
         
-        # 🔥 乾淨清爽的表格，保留「成本價」
         portfolio_data.append({
             "群組": item["群組"], 
             "代號": item["股票代號"], 
@@ -632,4 +639,3 @@ elif page == "🔍 個股 K 線與進場分析":
 
         else:
             st.error("找不到該股票代號的資料，請確認代號是否正確。")
-            
