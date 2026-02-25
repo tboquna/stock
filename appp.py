@@ -201,8 +201,44 @@ if page == "📊 個人持股監控":
     total_sell_cash = 0
 
     for item in filtered_portfolio:
-        hist, _ = fetch_stock_history(item["股票代號"], period="1d")
-        current_price = round(hist['Close'].iloc[-1], 2) if hist is not None else 0
+        # 🔥 拉長讀取期間以計算均線與ATR
+        hist, _ = fetch_stock_history(item["股票代號"], period="2mo")
+        current_price = 0
+        entry_str = sl_str = tp_str = "無"
+        
+        if hist is not None and not hist.empty:
+            current_price = round(hist['Close'].iloc[-1], 2)
+            
+            # 🔥 自動計算清單中每一檔的適合進場價、停損與停利
+            if len(hist) >= 20:
+                hist['MA5'] = hist['Close'].rolling(window=5).mean()
+                hist['MA20'] = hist['Close'].rolling(window=20).mean()
+                hist['H-L'] = hist['High'] - hist['Low']
+                hist['H-PC'] = abs(hist['High'] - hist['Close'].shift(1))
+                hist['L-PC'] = abs(hist['Low'] - hist['Close'].shift(1))
+                hist['TR'] = hist[['H-L', 'H-PC', 'L-PC']].max(axis=1)
+                hist['ATR'] = hist['TR'].rolling(window=14).mean()
+                
+                latest_ma5 = hist['MA5'].iloc[-1]
+                latest_ma20 = hist['MA20'].iloc[-1]
+                latest_atr = hist['ATR'].iloc[-1]
+                recent_10d_low = hist['Low'].tail(10).min()
+                
+                if current_price > latest_ma20 and latest_ma5 > latest_ma20: entry_price = latest_ma5
+                elif current_price > latest_ma20 and latest_ma5 <= latest_ma20: entry_price = latest_ma20
+                else: entry_price = current_price
+                    
+                atr_stop = entry_price - (1.5 * latest_atr)
+                stop_loss_price = min(recent_10d_low, atr_stop) 
+                if (entry_price - stop_loss_price) / entry_price > 0.1: 
+                    stop_loss_price = entry_price * 0.90
+                
+                risk_per_share = entry_price - stop_loss_price
+                take_profit_price = entry_price + (risk_per_share * 2)
+                
+                entry_str = f"{round(entry_price, 2)}"
+                sl_str = f"{round(stop_loss_price, 2)}"
+                tp_str = f"{round(take_profit_price, 2)}"
         
         cost = item["平均成本"] * item["持有股數"]
         value = current_price * item["持有股數"] if current_price else 0
@@ -229,13 +265,21 @@ if page == "📊 個人持股監控":
         total_cost += cost
         total_value += value
         
+        # 🔥 將點位加入表格中 (移除部分較不重要的總額欄位以節省空間)
         portfolio_data.append({
-            "群組": item["群組"], "代號": item["股票代號"], "名稱": item["股票名稱"], 
-            "持有(股)": item["持有股數"], "目標(股)": target_shares, 
-            "調整動作": action_str, "預估資金變動": cash_str,
-            "均價": item["平均成本"], "現價": current_price if current_price else "無資料",
-            "總成本": f"{int(cost):,}", "總現值": f"{int(value):,}", 
-            "未實現損益": f"{int(profit):,}", "報酬率 (%)": round(profit_percent, 2),
+            "群組": item["群組"], 
+            "代號": item["股票代號"], 
+            "名稱": item["股票名稱"], 
+            "現價": current_price if current_price else "無資料",
+            "進場價": entry_str,
+            "停損": sl_str,
+            "停利": tp_str,
+            "持有(股)": item["持有股數"], 
+            "目標(股)": target_shares, 
+            "動作": action_str, 
+            "均價": item["平均成本"], 
+            "未實現損益": f"{int(profit):,}", 
+            "報酬率(%)": round(profit_percent, 2),
             "_raw_value": value 
         })
 
@@ -283,21 +327,20 @@ if page == "📊 個人持股監控":
         df = pd.DataFrame(portfolio_data)
         df_display = df.drop(columns=["_raw_value"], errors='ignore')
         
-        st.markdown("### 📋 持股與佈局明細")
+        st.markdown("### 📋 持股與操作計畫明細")
         st.table(
             df_display.style.map(
                 lambda x: 'color: red' if type(x) in [float, int] and x > 0 else ('color: green' if type(x) in [float, int] and x < 0 else ''), 
-                subset=["報酬率 (%)"]
+                subset=["報酬率(%)"]
             )
         )
 
 # -------------------------------------------------------------------
-# 🔥 全新分頁：當沖開盤環境評估 (加入雙模式切換)
+# 🔥 全新分頁：當沖開盤環境評估 (加入雙模式切換 + 點位面板)
 # -------------------------------------------------------------------
 elif page == "⚡ 當沖開盤環境評估":
     st.title("⚡ 當沖開盤環境與股性評估")
     
-    # 🔥 新增雙模式切換器
     eval_mode = st.radio("請選擇評估模式：", 
                          ["🌙 盤前潛力評估 (前一交易日資料，適合 09:00 前使用)", 
                           "☀️ 開盤後動能評估 (今日即時資料，適合 09:15 後使用)"], 
@@ -308,8 +351,16 @@ elif page == "⚡ 當沖開盤環境評估":
     if st.button("開始評估", type="primary"):
         hist_data, actual_symbol = fetch_stock_history(dt_ticker, period="2mo")
         
-        if hist_data is not None and len(hist_data) >= 5:
-            # 計算基礎共用指標 (ATR 與均量)
+        # 🔥 動態抓取股票名稱
+        try:
+            stock_info = yf.Ticker(actual_symbol).info
+            stock_name = stock_info.get('shortName', dt_ticker)
+        except:
+            stock_name = dt_ticker
+        
+        if hist_data is not None and len(hist_data) >= 20:
+            hist_data['MA5'] = hist_data['Close'].rolling(window=5).mean()
+            hist_data['MA20'] = hist_data['Close'].rolling(window=20).mean()
             hist_data['H-L'] = hist_data['High'] - hist_data['Low']
             hist_data['H-PC'] = abs(hist_data['High'] - hist_data['Close'].shift(1))
             hist_data['L-PC'] = abs(hist_data['Low'] - hist_data['Close'].shift(1))
@@ -317,16 +368,40 @@ elif page == "⚡ 當沖開盤環境評估":
             hist_data['ATR_14'] = hist_data['TR'].rolling(14).mean()
             hist_data['Vol_5MA'] = hist_data['Volume'].rolling(5).mean()
             
+            latest_ma5 = hist_data['MA5'].iloc[-1]
+            latest_ma20 = hist_data['MA20'].iloc[-1]
+            latest_atr = hist_data['ATR_14'].iloc[-1]
+            latest_close = hist_data['Close'].iloc[-1]
+            recent_10d_low = hist_data['Low'].tail(10).min()
+            
+            if latest_close > latest_ma20 and latest_ma5 > latest_ma20: entry_price = latest_ma5
+            elif latest_close > latest_ma20 and latest_ma5 <= latest_ma20: entry_price = latest_ma20
+            else: entry_price = latest_close
+                
+            atr_stop = entry_price - (1.5 * latest_atr)
+            stop_loss_price = min(recent_10d_low, atr_stop) 
+            if (entry_price - stop_loss_price) / entry_price > 0.1: stop_loss_price = entry_price * 0.90
+            
+            risk_per_share = entry_price - stop_loss_price
+            take_profit_price = entry_price + (risk_per_share * 2)
+
+            st.divider()
+            # 🔥 新增：醒目的個股操作點位儀表板
+            st.markdown(f"### 🎯 【{stock_name}】關鍵操作點位參考")
+            c_p, c_e, c_s, c_t = st.columns(4)
+            c_p.metric("💰 最新股價", f"{round(latest_close, 2)}")
+            c_e.metric("📍 適合進場價 (支撐)", f"{round(entry_price, 2)}")
+            c_s.metric("🛡️ 嚴格停損價", f"{round(stop_loss_price, 2)}")
+            c_t.metric("🎯 目標停利價", f"{round(take_profit_price, 2)}")
             st.divider()
 
             # ==========================================
-            # 模式 A：盤前潛力評估 (看最後一個完整交易日)
+            # 模式 A：盤前潛力評估
             # ==========================================
             if "盤前" in eval_mode:
                 st.markdown("### 🌙 盤前選股基因檢測")
                 st.caption("評估依據：最新一個完整交易日的收盤表現。尋找「高振幅、剛爆量、收最高」的當沖絕佳獵物。")
                 
-                # 取最後一筆資料 (因為盤前，最新的資料就是昨天的收盤)
                 target_day = hist_data.iloc[-1]
                 t_close = target_day['Close']
                 t_open = target_day['Open']
@@ -334,15 +409,11 @@ elif page == "⚡ 當沖開盤環境評估":
                 t_low = target_day['Low']
                 t_vol = target_day['Volume']
                 
-                # 指標計算
                 atr_pct = (target_day['ATR_14'] / t_close) * 100
                 vol_ratio = t_vol / target_day['Vol_5MA'] if target_day['Vol_5MA'] > 0 else 1
                 
-                # 計算 K 線實體與留影線狀況 (0~1之間，1代表收在最高點)
-                if t_high != t_low:
-                    k_strength = (t_close - t_low) / (t_high - t_low)
-                else:
-                    k_strength = 0.5
+                if t_high != t_low: k_strength = (t_close - t_low) / (t_high - t_low)
+                else: k_strength = 0.5
 
                 col1, col2, col3 = st.columns(3)
                 
@@ -358,17 +429,13 @@ elif page == "⚡ 當沖開盤環境評估":
                 col3.metric("📈 K線收盤位置", f"{round(k_strength*100, 1)} %", k_status, delta_color=k_color)
                 
                 st.markdown("#### 🎯 盤前系統判定結果：")
-                if atr_pct < 2.0:
-                    st.error("❌ **不適合放入自選池**：股性太過牛皮 (振幅 < 2%)，盤中波動極小，當沖極難獲利。")
-                elif vol_ratio >= 1.5 and atr_pct >= 2.5 and k_strength >= 0.7:
-                    st.success("🔥 **極佳當沖獵物 (強烈建議加入自選)**：昨日明顯爆量且收在相對高點，加上股性活潑，今日極有可能延續強勢動能！開盤請密切注意是否跳空開高。")
-                elif atr_pct >= 2.5 and k_strength <= 0.3:
-                    st.warning("⚠️ **留意隔日沖倒貨賣壓**：股性活潑但昨日收盤偏弱 (留長上影線)。今日早盤若開平低，極易出現失望性賣壓，**較適合伺機做空 (或等急跌有撐後搶反彈)**。")
-                else:
-                    st.info("🟡 **中性觀察標的**：股性尚可，但量能未明顯爆發或 K 線表現平庸，需等開盤後實際動能(跳空幅度)表態才能確認方向。")
+                if atr_pct < 2.0: st.error("❌ **不適合放入自選池**：股性太過牛皮 (振幅 < 2%)，盤中波動極小，當沖極難獲利。")
+                elif vol_ratio >= 1.5 and atr_pct >= 2.5 and k_strength >= 0.7: st.success("🔥 **極佳當沖獵物 (強烈建議加入自選)**：昨日明顯爆量且收在相對高點，加上股性活潑，今日極有可能延續強勢動能！開盤請密切注意是否跳空開高。")
+                elif atr_pct >= 2.5 and k_strength <= 0.3: st.warning("⚠️ **留意隔日沖倒貨賣壓**：股性活潑但昨日收盤偏弱 (留長上影線)。今日早盤若開平低，極易出現失望性賣壓，**較適合伺機做空 (或等急跌有撐後搶反彈)**。")
+                else: st.info("🟡 **中性觀察標的**：股性尚可，但量能未明顯爆發或 K線表現平庸，需等開盤後實際動能表態。")
 
             # ==========================================
-            # 模式 B：開盤後動能評估 (原有的即時邏輯)
+            # 模式 B：開盤後動能評估
             # ==========================================
             else:
                 st.markdown("### ☀️ 開盤後即時動能掃描")
@@ -398,16 +465,11 @@ elif page == "⚡ 當沖開盤環境評估":
                 col3.metric(f"🥊 早盤多空交戰", f"{round(t_current, 2)}", f"距開盤 {round(intraday_pct, 2)} % ({intra_status})", delta_color=intra_color)
                 
                 st.markdown("#### 🎯 盤中系統判定結果：")
-                if atr_pct < 2.0:
-                    st.error("❌ **不建議當沖 (無肉可吃)**：這檔股票近期的平均振幅不到 2%，幾乎沒有獲利空間。")
-                elif gap_pct > 4.5:
-                    st.warning("⚠️ **高風險 (留意 A 轉倒貨)**：跳空幅度過大，若早盤跌破開盤價，極易引發停損賣壓。若要做多，停損必須抓極短。")
-                elif gap_pct <= 0 and intraday_pct < 0:
-                    st.warning("📉 **弱勢盤整 (偏空)**：跳空開低且盤中持續走低。不適合做多，若嘗試做空請以「今日高點」為絕對停損。")
-                elif 1.0 <= gap_pct <= 4.0 and intraday_pct >= 0 and atr_pct >= 2.5:
-                    st.success("✅ **當沖絕佳環境 (順勢做多)**：跳空 1%~4% 且未 A 轉，股性活潑。建議等待「量縮回測開盤價或 VWAP」不破時切入。")
-                else:
-                    st.info("🟡 **中性環境 (震盪盤)**：缺乏強烈單向動能。建議觀望或採取「高出低進」打帶跑策略。")
+                if atr_pct < 2.0: st.error("❌ **不建議當沖 (無肉可吃)**：這檔股票近期的平均振幅不到 2%，幾乎沒有獲利空間。")
+                elif gap_pct > 4.5: st.warning("⚠️ **高風險 (留意 A 轉倒貨)**：跳空幅度過大，若早盤跌破開盤價，極易引發停損賣壓。若要做多，停損必須抓極短。")
+                elif gap_pct <= 0 and intraday_pct < 0: st.warning("📉 **弱勢盤整 (偏空)**：跳空開低且盤中持續走低。不適合做多，若嘗試做空請以「今日高點」為絕對停損。")
+                elif 1.0 <= gap_pct <= 4.0 and intraday_pct >= 0 and atr_pct >= 2.5: st.success("✅ **當沖絕佳環境 (順勢做多)**：跳空 1%~4% 且未 A 轉，股性活潑。建議等待「量縮回測開盤價或 VWAP」不破時切入。")
+                else: st.info("🟡 **中性環境 (震盪盤)**：缺乏強烈單向動能。建議觀望或採取「高出低進」打帶跑策略。")
 
 # -------------------------------------------------------------------
 # 分頁 B：市場恐慌指數 (VIX)
