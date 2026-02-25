@@ -408,53 +408,7 @@ elif page == "🔍 個股 K 線與進場分析":
             # ==========================================
             # 🔥 全新升級：策略計畫與邏輯核心 (均線限價單版本)
             # ==========================================
-            st.markdown("### 🤖 系統技術面與進出場策略")
-            
-            if pd.isna(latest_ma20) or pd.isna(latest_atr):
-                st.warning("資料量不足以計算技術指標，請選擇更長的期間。")
-            else:
-                # 1. 判斷趨勢狀態與「動態進場價」
-                if latest_close > latest_ma20 and latest_ma5 > latest_ma20:
-                    trend_status = "📈 **強勢多頭** (站上月線且短均線大於長均線)"
-                    entry_advice = "多方控盤。建議在股價量縮回測 MA5 (週線) 不破時進場。"
-                    entry_price = latest_ma5  # 策略：回測週線買進
-                    entry_label = "📍 建議進場價 (回測週線)"
-                elif latest_close > latest_ma20 and latest_ma5 <= latest_ma20:
-                    trend_status = "🪀 **反彈震盪** (站上月線，但短線尚未完全轉強)"
-                    entry_advice = "屬於築底反彈階段，密切觀察 MA20 是否能確實守住轉為支撐。"
-                    entry_price = latest_ma20 # 策略：月線支撐買進
-                    entry_label = "📍 建議進場價 (月線支撐)"
-                elif latest_close <= latest_ma20 and latest_ma5 > latest_ma20:
-                    trend_status = "⚠️ **短線轉弱** (跌破月線，但均線格局仍偏多)"
-                    entry_advice = "跌破重要支撐！建議暫時觀望，確認重新站回 MA20 月線後再考慮。"
-                    entry_price = latest_close # 策略：觀望，以現價當試算
-                    entry_label = "📍 試算基準 (建議觀望)"
-                else:
-                    trend_status = "📉 **弱勢空頭** (跌破月線且均線空頭排列)"
-                    entry_advice = "目前長線趨勢向下，上檔套牢壓力沉重。強烈建議「不要進場接刀」。"
-                    entry_price = latest_close # 策略：觀望，以現價當試算
-                    entry_label = "📍 試算基準 (強烈觀望)"
-
-                st.info(f"**目前盤勢：** {trend_status}  \n**操作建議：** {entry_advice}")
-
-                # 2. 計算動態進出場點位 (以 entry_price 為基礎計算風報比)
-                recent_10d_low = hist_data['Low'].tail(10).min()
-                atr_stop = entry_price - (1.5 * latest_atr) # 從「預計進場價」往下算容忍波動
-                
-                # 取近10日低點與ATR動態低點中，較安全(較低)的那一個作為防守線
-                stop_loss_price = min(recent_10d_low, atr_stop) 
-                
-                # 絕對防禦機制：不論波動多大，最大虧損不超過進場價的 10%
-                if (entry_price - stop_loss_price) / entry_price > 0.1: 
-                    stop_loss_price = entry_price * 0.90
-                
-                # 算出預計承擔的風險金額
-                risk_per_share = entry_price - stop_loss_price
-                
-                # 停利：風報比 1:2 (賺要賺賠的兩倍)
-                take_profit_price = entry_price + (risk_per_share * 2)
-                
-                st.markdown("#### 🎯 動態波動防護模型 (風報比 1:2)")
+           st.markdown("#### 🎯 動態波動防護模型 (風報比 1:2)")
                 col_e, col_s, col_t = st.columns(3)
                 
                 col_e.metric(entry_label, f"{round(entry_price, 2)}")
@@ -466,5 +420,7 @@ elif page == "🔍 個股 K 線與進場分析":
                 tp_percent = ((take_profit_price - entry_price) / entry_price) * 100
                 col_t.metric("💰 目標停利價", f"{round(take_profit_price, 2)}", f"+{round(tp_percent, 2)} %", delta_color="normal")
                 
-               st.caption(f"💡 **策略邏輯說明**：若為多頭趨勢，系統會建議在**均線支撐處（MA5 或 MA20）**掛限價單進場，而非盲目追高收盤價。停損與停利皆以此「建議進場價」搭配真實波動幅度 ATR (目前為 {round(latest_atr, 2)}) 進行 1:2 風報比推算，並將虧損風險控制在 10% 以內。")
+                st.caption(f"💡 **策略邏輯說明**：若為多頭趨勢，系統會建議在**均線支撐處（MA5 或 MA20）**掛限價單進場，而非盲目追高收盤價。停損與停利皆以此「建議進場價」搭配真實波動幅度 ATR (目前為 {round(latest_atr, 2)}) 進行 1:2 風報比推算，並將虧損風險控制在 10% 以內。")
+
+        else:
             st.error("找不到該股票代號的資料，請確認代號是否正確。")
