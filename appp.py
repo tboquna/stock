@@ -43,7 +43,8 @@ for item in st.session_state.portfolio:
 # 2. 側邊欄 (Sidebar) - 分頁導覽
 # ==========================================
 st.sidebar.title("🧭 網站導覽")
-page = st.sidebar.radio("選擇頁面", ["📊 個人持股監控", "😱 市場恐慌指數 (VIX)", "🔍 個股 K 線與進場分析"])
+# 🔥 新增了當沖評估的分頁
+page = st.sidebar.radio("選擇頁面", ["📊 個人持股監控", "⚡ 當沖開盤環境評估", "😱 市場恐慌指數 (VIX)", "🔍 個股 K 線與進場分析"])
 st.sidebar.divider()
 
 @st.cache_data(ttl=60)
@@ -60,7 +61,6 @@ def fetch_stock_history(ticker, period="6mo"):
         pass
     return None, None
 
-# 🔥 新增：抓取三大法人買賣超資料 (透過 FinMind)
 @st.cache_data(ttl=3600)
 def fetch_institutional(ticker):
     start_date = (datetime.now() - timedelta(days=15)).strftime("%Y-%m-%d")
@@ -85,7 +85,6 @@ def fetch_institutional(ticker):
             df['name'] = df['name'].map(name_map).fillna(df['name'])
             pivot_df = df.pivot_table(index='date', columns='name', values='net', aggfunc='sum').fillna(0)
             pivot_df = pivot_df.sort_index(ascending=False).head(5)
-            # 轉換為張數
             pivot_df = (pivot_df / 1000).round(0).astype(int)
             pivot_df['三大法人合計'] = pivot_df.sum(axis=1)
             
@@ -294,6 +293,78 @@ if page == "📊 個人持股監控":
         )
 
 # -------------------------------------------------------------------
+# 🔥 全新分頁：當沖開盤環境評估
+# -------------------------------------------------------------------
+elif page == "⚡ 當沖開盤環境評估":
+    st.title("⚡ 當沖開盤環境與股性評估")
+    st.markdown("⚠️ **注意**：免費 API 報價有 15~20 分鐘延遲。本頁面專門用來在「開盤後」評估該檔股票今日的**跳空動能**與**近期股性**，判斷是否具備當沖（Day Trading）的先天條件。")
+    
+    dt_ticker = st.text_input("輸入要評估的股票代號", value="2330", placeholder="例如: 2330")
+    
+    if st.button("開始評估股性", type="primary"):
+        hist_data, actual_symbol = fetch_stock_history(dt_ticker, period="1mo")
+        
+        if hist_data is not None and len(hist_data) >= 2:
+            # 取得昨日與今日(或最新)資料
+            yesterday_data = hist_data.iloc[-2]
+            today_data = hist_data.iloc[-1]
+            
+            y_close = yesterday_data['Close']
+            t_open = today_data['Open']
+            t_current = today_data['Close']
+            t_high = today_data['High']
+            t_low = today_data['Low']
+            
+            # 1. 計算跳空幅度 (Gap)
+            gap_pct = ((t_open - y_close) / y_close) * 100
+            
+            # 2. 計算近期 ATR (14日平均真實波動幅度) 與 振幅比率
+            hist_data['H-L'] = hist_data['High'] - hist_data['Low']
+            hist_data['H-PC'] = abs(hist_data['High'] - hist_data['Close'].shift(1))
+            hist_data['L-PC'] = abs(hist_data['Low'] - hist_data['Close'].shift(1))
+            hist_data['TR'] = hist_data[['H-L', 'H-PC', 'L-PC']].max(axis=1)
+            atr_14 = hist_data['TR'].rolling(14).mean().iloc[-1]
+            atr_pct = (atr_14 / t_current) * 100  # 股性活潑度
+            
+            # 3. 計算今日早盤強弱 (現價與開盤價比較)
+            intraday_pct = ((t_current - t_open) / t_open) * 100
+            
+            st.divider()
+            col1, col2, col3 = st.columns(3)
+            
+            # --- 指標 1: 跳空動能 ---
+            gap_color = "normal" if gap_pct >= 0 else "inverse"
+            col1.metric("🚀 今日開盤跳空", f"{round(t_open, 2)}", f"{round(gap_pct, 2)} %", delta_color=gap_color)
+            
+            # --- 指標 2: 股性活潑度 ---
+            atr_status = "🔥 活潑" if atr_pct >= 2.5 else "🐢 牛皮"
+            col2.metric(f"📊 股性活潑度 (ATR%) - {atr_status}", f"{round(atr_14, 2)} 元", f"均振幅 {round(atr_pct, 2)} %", delta_color="off")
+            
+            # --- 指標 3: 盤中動能 ---
+            intra_color = "normal" if intraday_pct >= 0 else "inverse"
+            intra_status = "開高走高" if intraday_pct > 0 else ("開平盤" if intraday_pct == 0 else "開高走低 (注意A轉)")
+            col3.metric(f"🥊 早盤多空交戰", f"{round(t_current, 2)}", f"距開盤 {round(intraday_pct, 2)} % ({intra_status})", delta_color=intra_color)
+            
+            st.markdown("### 📝 系統當沖綜合判定")
+            
+            # 綜合判定邏輯
+            if atr_pct < 2.0:
+                st.error("❌ **不建議當沖 (無肉可吃)**：這檔股票近期的平均振幅不到 2%，盤中波動太小。扣掉當沖的手續費與交易稅後，幾乎沒有獲利空間，容易做白工。")
+            elif gap_pct > 4.5:
+                st.warning("⚠️ **高風險 (留意 A 轉倒貨)**：今日跳空幅度過大 (超過 4.5%)，雖然強勢，但也代表昨天買的人已經獲利豐厚。如果早盤跌破開盤價，極度容易引發「人踩人」的停損賣壓。若要做多，停損必須抓極短。")
+            elif gap_pct <= 0 and intraday_pct < 0:
+                st.warning("📉 **弱勢盤整 (偏空)**：跳空開低且盤中持續走低，今日多方完全棄守。不適合做多，若想嘗試做空，請以「今日高點」作為絕對停損。")
+            elif 1.0 <= gap_pct <= 4.0 and intraday_pct >= 0 and atr_pct >= 2.5:
+                st.success("✅ **當沖絕佳環境 (順勢做多)**：跳空 1%~4% 是最棒的表態區間，且開盤後維持在開盤價之上 (未 A 轉)，加上股性活潑 (振幅>2.5%)。建議可以等待「量縮回測開盤價或 VWAP」不破時，嘗試切入做多。")
+            else:
+                st.info("🟡 **中性環境 (震盪盤)**：目前缺乏強烈的多空單向動能，可能是狹幅震盪。當沖難度較高，建議觀望或縮小部位，採取「高出低進」的打帶跑策略。")
+
+            st.caption("💡 **當沖鐵律**：無論系統判定環境多好，當沖的靈魂在於「嚴格停損」。買進後若跌破前一波低點或今日開盤價，請毫不猶豫砍單；13:25 前無論賺賠務必全數平倉出場。")
+            
+        else:
+            st.error("資料獲取失敗，請確認代號是否正確。")
+
+# -------------------------------------------------------------------
 # 分頁 B：市場恐慌指數 (VIX)
 # -------------------------------------------------------------------
 elif page == "😱 市場恐慌指數 (VIX)":
@@ -477,14 +548,10 @@ elif page == "🔍 個股 K 線與進場分析":
                 
                 st.caption(f"💡 **策略邏輯說明**：若為多頭趨勢，系統會建議在**均線支撐處（MA5 或 MA20）**掛限價單進場，而非盲目追高收盤價。停損與停利皆以此「建議進場價」搭配真實波動幅度 ATR (目前為 {round(latest_atr, 2)}) 進行 1:2 風報比推算，並將虧損風險控制在 10% 以內。")
 
-            # ==========================================
-            # 🔥 新增：三大法人買賣超區塊
-            # ==========================================
             st.divider()
             st.markdown("### 🏦 近 5 日三大法人買賣超 (單位: 張)")
             inst_df = fetch_institutional(target_ticker)
             if not inst_df.empty:
-                # 台股慣例：買超為紅字，賣超為綠字
                 st.dataframe(
                     inst_df.style.map(
                         lambda x: 'color: red' if type(x) in [float, int] and x > 0 else ('color: green' if type(x) in [float, int] and x < 0 else ''), 
