@@ -21,7 +21,6 @@ def update_gsheets(data_list):
         new_df = new_df[["群組", "股票代號", "股票名稱", "持有股數", "平均成本", "目標股數"]]
     conn.update(worksheet="Portfolio", data=new_df)
 
-# 🔥 新增：自選股池的更新函式
 def update_watchlist_gsheets(data_list):
     new_df = pd.DataFrame(data_list)
     if not new_df.empty:
@@ -36,15 +35,13 @@ if 'portfolio' not in st.session_state:
         st.session_state.portfolio = df_portfolio.to_dict('records')
     except Exception as e:
         st.session_state.portfolio = [
-            {"群組": "半導體", "股票代號": "2330", "股票名稱": "台積電", "持有股數": 1000, "平均成本": 650.0, "目標股數": 2000},
-            {"群組": "ETF", "股票代號": "0050", "股票名稱": "元大台灣50", "持有股數": 2000, "平均成本": 140.0, "目標股數": 1000}
+            {"群組": "半導體", "股票代號": "2330", "股票名稱": "台積電", "持有股數": 1000, "平均成本": 650.0, "目標股數": 2000}
         ]
 
 for item in st.session_state.portfolio:
     if "群組" not in item: item["群組"] = "其他"
     if "目標股數" not in item: item["目標股數"] = item.get("持有股數", 1000)
 
-# 🔥 新增：初始化自選股清單
 if 'watchlist' not in st.session_state:
     try:
         df_watch = conn.read(worksheet="Watchlist", ttl=0)
@@ -52,9 +49,7 @@ if 'watchlist' not in st.session_state:
         df_watch["股票代號"] = df_watch["股票代號"].astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(4)
         st.session_state.watchlist = df_watch.to_dict('records')
     except Exception:
-        st.session_state.watchlist = [
-            {"股票代號": "2330", "股票名稱": "台積電", "備註": "權王觀察指標"}
-        ]
+        st.session_state.watchlist = [{"股票代號": "2330", "股票名稱": "台積電", "備註": "權王觀察指標"}]
 
 # ==========================================
 # 2. 側邊欄 (Sidebar) - 分頁導覽
@@ -143,10 +138,8 @@ if page == "📊 個人持股監控":
     
     with st.sidebar.expander("➕ 新增持股", expanded=False):
         selected_group = st.selectbox("群組分類", combined_groups)
-        if selected_group == "➕ 自訂新群組...":
-            new_group = st.text_input("請輸入自訂群組名稱", placeholder="如: 網通股")
-        else:
-            new_group = selected_group
+        if selected_group == "➕ 自訂新群組...": new_group = st.text_input("請輸入自訂群組名稱", placeholder="如: 網通股")
+        else: new_group = selected_group
             
         new_ticker = st.text_input("股票代號 (如: 2317)", placeholder="輸入純數字代號")
         new_name = st.text_input("股票名稱 (如: 鴻海)")
@@ -159,10 +152,7 @@ if page == "📊 個人持股監控":
                 existing_tickers = [item["股票代號"] for item in st.session_state.portfolio]
                 if new_ticker in existing_tickers: st.sidebar.error("已在清單中！")
                 else:
-                    st.session_state.portfolio.append({
-                        "群組": new_group.strip(), "股票代號": new_ticker.strip(), 
-                        "股票名稱": new_name, "持有股數": new_shares, "平均成本": new_cost, "目標股數": new_target
-                    })
+                    st.session_state.portfolio.append({"群組": new_group.strip(), "股票代號": new_ticker.strip(), "股票名稱": new_name, "持有股數": new_shares, "平均成本": new_cost, "目標股數": new_target})
                     try: update_gsheets(st.session_state.portfolio)
                     except: pass
                     st.rerun()
@@ -172,9 +162,7 @@ if page == "📊 個人持股監控":
             ticker_options = [item['股票代號'] for item in st.session_state.portfolio]
             def get_stock_name(ticker):
                 for item in st.session_state.portfolio:
-                    if item["股票代號"] == ticker:
-                        name = item.get("股票名稱", "")
-                        return str(name) if name and not pd.isna(name) and str(name).strip() != "" and str(name).lower() != "nan" else str(ticker)
+                    if item["股票代號"] == ticker: return str(item.get("股票名稱", ticker))
                 return str(ticker)
 
             selected_ticker = st.selectbox("選擇要操作的股票", ticker_options, format_func=get_stock_name)
@@ -182,8 +170,7 @@ if page == "📊 個人持股監控":
             current_group = current_item.get("群組", "其他")
             
             edit_groups_list = combined_groups.copy()
-            if current_group not in edit_groups_list and current_group != "➕ 自訂新群組...":
-                edit_groups_list.insert(0, current_group)
+            if current_group not in edit_groups_list and current_group != "➕ 自訂新群組...": edit_groups_list.insert(0, current_group)
                 
             edit_group_choice = st.selectbox("更新群組分類", edit_groups_list, index=edit_groups_list.index(current_group) if current_group in edit_groups_list else 0)
             if edit_group_choice == "➕ 自訂新群組...": edit_group = st.text_input("請輸入自訂群組名稱", value=current_group)
@@ -195,10 +182,7 @@ if page == "📊 個人持股監控":
             
             col1, col2 = st.columns(2)
             if col1.button("更新數值"):
-                current_item["群組"] = edit_group
-                current_item["持有股數"] = edit_shares
-                current_item["平均成本"] = edit_cost
-                current_item["目標股數"] = edit_target
+                current_item["群組"], current_item["持有股數"], current_item["平均成本"], current_item["目標股數"] = edit_group, edit_shares, edit_cost, edit_target
                 try: update_gsheets(st.session_state.portfolio)
                 except: pass
                 st.rerun()
@@ -242,8 +226,7 @@ if page == "📊 個人持股監控":
             action_str = f"📉 賣出 {abs(diff_shares)}"
             cash_flow = abs(diff_shares) * current_price if current_price else 0
             total_sell_cash += cash_flow
-        else:
-            action_str = "✅ 已達標"
+        else: action_str = "✅ 已達標"
             
         total_cost += cost
         total_value += value
@@ -272,27 +255,22 @@ if page == "📊 個人持股監控":
         if total_value > 0:
             group_value_map = {}
             for item in portfolio_data:
-                if item["_raw_value"] > 0:
-                    grp = item["群組"]
-                    group_value_map[grp] = group_value_map.get(grp, 0) + item["_raw_value"]
+                if item["_raw_value"] > 0: group_value_map[item["群組"]] = group_value_map.get(item["群組"], 0) + item["_raw_value"]
             pie_labels, pie_values = list(group_value_map.keys()), list(group_value_map.values())
             fig_pie = go.Figure(data=[go.Pie(labels=pie_labels, values=pie_values, hole=.4, textinfo='label+percent')])
             fig_pie.update_layout(title_text="🍰 資產配置 (依市值)", margin=dict(t=30, b=0, l=0, r=0), height=250)
             st.plotly_chart(fig_pie, use_container_width=True)
-        else:
-            st.info("尚無現值資料可繪製圓餅圖")
+        else: st.info("尚無現值資料可繪製圓餅圖")
 
     st.divider()
     if len(portfolio_data) > 0:
         df = pd.DataFrame(portfolio_data)
         st.markdown("### 📋 持股明細")
         st.table(df.drop(columns=["_raw_value"], errors='ignore').style.map(
-            lambda x: 'color: red' if type(x) in [float, int] and x > 0 else ('color: green' if type(x) in [float, int] and x < 0 else ''), 
-            subset=["報酬率(%)"]
-        ))
+            lambda x: 'color: red' if type(x) in [float, int] and x > 0 else ('color: green' if type(x) in [float, int] and x < 0 else ''), subset=["報酬率(%)"]))
 
 # -------------------------------------------------------------------
-# 🔥 全新分頁 B：自選股觀察池
+# 分頁 B：自選股觀察池
 # -------------------------------------------------------------------
 elif page == "🌟 自選股觀察池":
     st.title("🌟 當沖與波段自選股池")
@@ -305,14 +283,9 @@ elif page == "🌟 自選股觀察池":
         
         if st.button("加入自選池", type="primary"):
             if w_ticker and w_name:
-                if w_ticker in [item["股票代號"] for item in st.session_state.watchlist]:
-                    st.error("這檔股票已經在自選池囉！")
+                if w_ticker in [item["股票代號"] for item in st.session_state.watchlist]: st.error("這檔股票已經在自選池囉！")
                 else:
-                    st.session_state.watchlist.append({
-                        "股票代號": w_ticker.strip(), 
-                        "股票名稱": w_name.strip(), 
-                        "備註": w_note.strip()
-                    })
+                    st.session_state.watchlist.append({"股票代號": w_ticker.strip(), "股票名稱": w_name.strip(), "備註": w_note.strip()})
                     try: update_watchlist_gsheets(st.session_state.watchlist)
                     except Exception as e: st.error(f"雲端存檔失敗: {e}")
                     st.success(f"{w_name} 已加入自選池！")
@@ -323,25 +296,14 @@ elif page == "🌟 自選股觀察池":
         watch_data = []
         for item in st.session_state.watchlist:
             hist, _ = fetch_stock_history(item["股票代號"], period="5d")
-            price_str = "無資料"
-            change_str = "-"
-            
+            price_str, change_str = "無資料", "-"
             if hist is not None and len(hist) >= 2:
-                latest_close = hist['Close'].iloc[-1]
-                prev_close = hist['Close'].iloc[-2]
+                latest_close, prev_close = hist['Close'].iloc[-1], hist['Close'].iloc[-2]
                 change_pct = ((latest_close - prev_close) / prev_close) * 100
                 price_str = f"{round(latest_close, 2)}"
-                change_str = f"{round(change_pct, 2)}%"
-                if change_pct > 0: change_str = "🔺 " + change_str
-                elif change_pct < 0: change_str = "🔻 " + change_str
+                change_str = f"🔺 {round(change_pct, 2)}%" if change_pct > 0 else f"🔻 {round(change_pct, 2)}%" if change_pct < 0 else f"{round(change_pct, 2)}%"
 
-            watch_data.append({
-                "代號": item["股票代號"],
-                "名稱": item["股票名稱"],
-                "現價": price_str,
-                "漲跌幅": change_str,
-                "備註 (作戰計畫)": item.get("備註", "")
-            })
+            watch_data.append({"代號": item["股票代號"], "名稱": item["股票名稱"], "現價": price_str, "漲跌幅": change_str, "備註 (作戰計畫)": item.get("備註", "")})
             
         df_watch = pd.DataFrame(watch_data)
         st.table(df_watch)
@@ -358,47 +320,35 @@ elif page == "🌟 自選股觀察池":
             st.success("移除成功！")
             st.rerun()
     else:
-        st.info("目前自選池是空的，快去尋找潛力股加入吧！")
-
-# -------------------------------------------------------------------
+        st.info("目前自選池是空的，快去尋找潛力股加入吧！")# -------------------------------------------------------------------
 # 分頁 C：盤後籌碼主力追蹤 (加入自選股連動)
 # -------------------------------------------------------------------
 elif page == "🏦 盤後籌碼主力追蹤":
     st.title("🏦 盤後籌碼與主力追蹤")
     st.markdown("法人買、散戶賣，籌碼安定好發財！盤後 15:30 更新三大法人動向，20:00 更新融資融券餘額。")
     
-    # 🔥 從自選股導入 UI
     wl_options = ["手動輸入代號..."] + [f"{item['股票代號']} {item['股票名稱']}" for item in st.session_state.get('watchlist', [])]
     wl_choice = st.selectbox("📂 從自選股快速帶入", wl_options)
     
-    if wl_choice == "手動輸入代號...":
-        chip_ticker = st.text_input("輸入要查詢的股票代號", value="2330", placeholder="例如: 2330")
-    else:
-        chip_ticker = wl_choice.split(" ")[0]
+    if wl_choice == "手動輸入代號...": chip_ticker = st.text_input("輸入要查詢的股票代號", value="2330", placeholder="例如: 2330")
+    else: chip_ticker = wl_choice.split(" ")[0]
     
     if st.button("開始籌碼健檢", type="primary"):
         hist_data, actual_symbol = fetch_stock_history(chip_ticker, period="1mo")
-        try:
-            stock_info = yf.Ticker(actual_symbol).info
-            stock_name = stock_info.get('shortName', chip_ticker)
-        except:
-            stock_name = chip_ticker
+        try: stock_name = yf.Ticker(actual_symbol).info.get('shortName', chip_ticker)
+        except: stock_name = chip_ticker
             
         latest_close = round(hist_data['Close'].iloc[-1], 2) if hist_data is not None else "無資料"
         st.markdown(f"### 🔍 【{stock_name}】籌碼日報 (現價: {latest_close})")
         
-        inst_df = fetch_institutional(chip_ticker)
-        margin_df = fetch_margin(chip_ticker)
+        inst_df, margin_df = fetch_institutional(chip_ticker), fetch_margin(chip_ticker)
         
         if not inst_df.empty:
-            if not margin_df.empty: chip_df = inst_df.join(margin_df, how='left').fillna(0)
-            else: chip_df = inst_df.copy()
+            chip_df = inst_df.join(margin_df, how='left').fillna(0) if not margin_df.empty else inst_df.copy()
             
             fig = go.Figure()
-            if '外資' in chip_df.columns:
-                fig.add_trace(go.Bar(x=chip_df.index, y=chip_df['外資'], name='外資', marker_color=chip_df['外資'].apply(lambda x: 'red' if x > 0 else 'green')))
-            if '投信' in chip_df.columns:
-                fig.add_trace(go.Bar(x=chip_df.index, y=chip_df['投信'], name='投信', marker_color=chip_df['投信'].apply(lambda x: 'darkred' if x > 0 else 'darkgreen')))
+            if '外資' in chip_df.columns: fig.add_trace(go.Bar(x=chip_df.index, y=chip_df['外資'], name='外資', marker_color=chip_df['外資'].apply(lambda x: 'red' if x > 0 else 'green')))
+            if '投信' in chip_df.columns: fig.add_trace(go.Bar(x=chip_df.index, y=chip_df['投信'], name='投信', marker_color=chip_df['投信'].apply(lambda x: 'darkred' if x > 0 else 'darkgreen')))
             fig.update_layout(title_text="📊 近 10 日外資與投信買賣超 (張數)", barmode='group', height=350, margin=dict(l=0, r=0, t=30, b=0))
             st.plotly_chart(fig, use_container_width=True)
 
@@ -413,10 +363,10 @@ elif page == "🏦 盤後籌碼主力追蹤":
             col2.metric("近 3 日投信總計", f"{int(sum_trust):,} 張", "買超偏多" if sum_trust>0 else "賣超偏空", delta_color="normal" if sum_trust>0 else "inverse")
             col3.metric("近 3 日融資總計 (散戶)", f"{int(sum_margin):,} 張", "散戶進場接刀" if sum_margin>0 else "散戶斷頭停損", delta_color="inverse" if sum_margin>0 else "normal")
             
-            if sum_foreign > 0 and sum_trust > 0 and sum_margin < 0: st.success("🌟 **【完美籌碼 - 極度集中】**：外資與投信同步買超，且散戶融資大舉退場。籌碼完全落入大戶手中，非常容易拉升，強烈建議偏多操作！")
-            elif (sum_foreign < 0 or sum_trust < 0) and sum_margin > 0: st.error("🚨 **【危險籌碼 - 散戶接刀】**：法人高檔倒貨，散戶不斷融資攤平。套牢賣壓重，強烈建議避開！")
-            elif sum_trust > 0 and sum_foreign < 0: st.info("🟡 **【土洋對作 - 投信認養】**：外資賣、投信護盤。通常相對抗跌，觀察投信買超是否延續。")
-            elif sum_foreign > 0 and sum_trust <= 0: st.info("🟡 **【外資單打獨鬥】**：靠外資買盤撐場，須留意隔日沖大戶(如美林、凱基台北)隔天的倒貨賣壓。")
+            if sum_foreign > 0 and sum_trust > 0 and sum_margin < 0: st.success("🌟 **【完美籌碼 - 極度集中】**：外資投信買超，散戶融資退場，非常容易拉升，建議偏多操作！")
+            elif (sum_foreign < 0 or sum_trust < 0) and sum_margin > 0: st.error("🚨 **【危險籌碼 - 散戶接刀】**：法人高檔倒貨，散戶不斷融資攤平，套牢賣壓重，強烈建議避開！")
+            elif sum_trust > 0 and sum_foreign < 0: st.info("🟡 **【土洋對作 - 投信認養】**：外資賣、投信護盤，相對抗跌，觀察投信買超是否延續。")
+            elif sum_foreign > 0 and sum_trust <= 0: st.info("🟡 **【外資單打獨鬥】**：靠外資買盤撐場，須留意隔日沖大戶隔天的倒貨賣壓。")
             else: st.warning("📉 **【籌碼渙散】**：法人買盤並不積極，缺乏推升股價的燃料。")
 
             st.divider()
@@ -425,30 +375,22 @@ elif page == "🏦 盤後籌碼主力追蹤":
         else: st.error("找不到近期籌碼資料。")
 
 # -------------------------------------------------------------------
-# 分頁 D：當沖開盤環境評估 (加入自選股連動)
+# 分頁 D：當沖開盤環境評估
 # -------------------------------------------------------------------
 elif page == "⚡ 當沖開盤環境評估":
     st.title("⚡ 當沖開盤環境與股性評估")
     
-    eval_mode = st.radio("請選擇評估模式：", 
-                         ["🌙 盤前潛力評估 (前一交易日資料，適合 09:00 前使用)", 
-                          "☀️ 開盤後動能評估 (今日即時資料，適合 09:15 後使用)"], 
-                         horizontal=True)
+    eval_mode = st.radio("請選擇評估模式：", ["🌙 盤前潛力評估 (前一交易日資料)", "☀️ 開盤後動能評估 (今日即時資料)"], horizontal=True)
     
-    # 🔥 從自選股導入 UI
     wl_options = ["手動輸入代號..."] + [f"{item['股票代號']} {item['股票名稱']}" for item in st.session_state.get('watchlist', [])]
     wl_choice = st.selectbox("📂 從自選股快速帶入", wl_options)
     
-    if wl_choice == "手動輸入代號...":
-        dt_ticker = st.text_input("輸入要評估的股票代號", value="2330", placeholder="例如: 2330")
-    else:
-        dt_ticker = wl_choice.split(" ")[0]
+    if wl_choice == "手動輸入代號...": dt_ticker = st.text_input("輸入要評估的股票代號", value="2330")
+    else: dt_ticker = wl_choice.split(" ")[0]
     
     if st.button("開始評估", type="primary"):
         hist_data, actual_symbol = fetch_stock_history(dt_ticker, period="2mo")
-        try:
-            stock_info = yf.Ticker(actual_symbol).info
-            stock_name = stock_info.get('shortName', dt_ticker)
+        try: stock_name = yf.Ticker(actual_symbol).info.get('shortName', dt_ticker)
         except: stock_name = dt_ticker
         
         if hist_data is not None and len(hist_data) >= 20:
@@ -461,10 +403,7 @@ elif page == "⚡ 當沖開盤環境評估":
             hist_data['ATR_14'] = hist_data['TR'].rolling(14).mean()
             hist_data['Vol_5MA'] = hist_data['Volume'].rolling(5).mean()
             
-            latest_ma5 = hist_data['MA5'].iloc[-1]
-            latest_ma20 = hist_data['MA20'].iloc[-1]
-            latest_atr = hist_data['ATR_14'].iloc[-1]
-            latest_close = hist_data['Close'].iloc[-1]
+            latest_ma5, latest_ma20, latest_atr, latest_close = hist_data['MA5'].iloc[-1], hist_data['MA20'].iloc[-1], hist_data['ATR_14'].iloc[-1], hist_data['Close'].iloc[-1]
             recent_10d_low = hist_data['Low'].tail(10).min()
             
             if latest_close > latest_ma20 and latest_ma5 > latest_ma20: entry_price = latest_ma5
@@ -474,9 +413,7 @@ elif page == "⚡ 當沖開盤環境評估":
             atr_stop = entry_price - (1.5 * latest_atr)
             stop_loss_price = min(recent_10d_low, atr_stop) 
             if (entry_price - stop_loss_price) / entry_price > 0.1: stop_loss_price = entry_price * 0.90
-            
-            risk_per_share = entry_price - stop_loss_price
-            take_profit_price = entry_price + (risk_per_share * 2)
+            take_profit_price = entry_price + ((entry_price - stop_loss_price) * 2)
 
             st.divider()
             st.markdown(f"### 🎯 【{stock_name}】關鍵操作點位參考")
@@ -499,11 +436,10 @@ elif page == "⚡ 當沖開盤環境評估":
                 col1, col2, col3 = st.columns(3)
                 col1.metric("📊 股性活潑度 (ATR%)", f"{round(atr_pct, 2)} %", "大於 2.5% 才適合當沖", delta_color="normal" if atr_pct >= 2.5 else "inverse")
                 col2.metric("💥 近期量能放大倍數", f"{round(vol_ratio, 1)} 倍", "🔥 爆量人氣股" if vol_ratio >= 1.5 else "平穩量", delta_color="normal" if vol_ratio >= 1.5 else "off")
-                k_color = "normal" if k_strength >= 0.7 else ("inverse" if k_strength <= 0.3 else "off")
-                col3.metric("📈 K線收盤位置", f"{round(k_strength*100, 1)} %", "強勢收高" if k_strength >= 0.7 else ("弱勢收低" if k_strength <= 0.3 else "長上影線/十字線"), delta_color=k_color)
+                col3.metric("📈 K線收盤位置", f"{round(k_strength*100, 1)} %", "強勢收高" if k_strength >= 0.7 else ("弱勢收低" if k_strength <= 0.3 else "長上影線/十字線"), delta_color="normal" if k_strength >= 0.7 else ("inverse" if k_strength <= 0.3 else "off"))
                 
                 st.markdown("#### 🎯 盤前系統判定結果：")
-                if atr_pct < 2.0: st.error("❌ **不適合放入自選池**：股性太過牛皮 (振幅 < 2%)，盤中波動極小，當沖極難獲利。")
+                if atr_pct < 2.0: st.error("❌ **不適合放入自選池**：股性太過牛皮，盤中波動極小，當沖極難獲利。")
                 elif vol_ratio >= 1.5 and atr_pct >= 2.5 and k_strength >= 0.7: st.success("🔥 **極佳當沖獵物**：昨日爆量收高且股性活潑，今日極可能延續強勢！")
                 elif atr_pct >= 2.5 and k_strength <= 0.3: st.warning("⚠️ **留意隔日沖倒貨賣壓**：股性活潑但留長上影線。早盤若開平低易有失望性賣壓，適合伺機做空。")
                 else: st.info("🟡 **中性觀察標的**：股性尚可，需等開盤後實際動能表態。")
@@ -515,4 +451,150 @@ elif page == "⚡ 當沖開盤環境評估":
                 
                 gap_pct = ((t_open - y_close) / y_close) * 100
                 atr_pct = (today_data['ATR_14'] / t_current) * 100
-                intraday_pct = ((t_current - t_open)
+                intraday_pct = ((t_current - t_open) / t_open) * 100 if t_open != 0 else 0
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("🚀 今日開盤跳空", f"{round(t_open, 2)}", f"{round(gap_pct, 2)} %", delta_color="normal" if gap_pct >= 0 else "inverse")
+                col2.metric(f"📊 股性活潑度 (ATR%)", f"{round(today_data['ATR_14'], 2)} 元", f"均振幅 {round(atr_pct, 2)} %", delta_color="off")
+                col3.metric(f"🥊 早盤多空交戰", f"{round(t_current, 2)}", f"距開盤 {round(intraday_pct, 2)} %", delta_color="normal" if intraday_pct >= 0 else "inverse")
+                
+                st.markdown("#### 🎯 盤中系統判定結果：")
+                if atr_pct < 2.0: st.error("❌ **不建議當沖 (無肉可吃)**：這檔股票近期平均振幅不到 2%。")
+                elif gap_pct > 4.5: st.warning("⚠️ **高風險 (留意 A 轉倒貨)**：跳空過大，若早盤跌破開盤價極易引發停損賣壓。")
+                elif gap_pct <= 0 and intraday_pct < 0: st.warning("📉 **弱勢盤整 (偏空)**：跳空開低且盤中持續走低。")
+                elif 1.0 <= gap_pct <= 4.0 and intraday_pct >= 0 and atr_pct >= 2.5: st.success("✅ **當沖絕佳環境 (順勢做多)**：跳空表態且未 A 轉，建議等待回測開盤價或 VWAP 不破時切入。")
+                else: st.info("🟡 **中性環境 (震盪盤)**：建議觀望或採取高出低進打帶跑策略。")
+
+# -------------------------------------------------------------------
+# 分頁 E：市場恐慌指數 (VIX)
+# -------------------------------------------------------------------
+elif page == "😱 市場恐慌指數 (VIX)":
+    st.title("😱 市場恐慌指數 (CBOE VIX)")
+    st.markdown("VIX 指數反映了投資人對未來 30 天市場波動的預期。由於台股與美股高度連動，此指數常被用來判斷全球資金的避險與恐慌程度。")
+    @st.cache_data(ttl=3600)
+    def fetch_vix(): return yf.Ticker("^VIX").history(period="6mo")
+    vix_data = fetch_vix()
+    if not vix_data.empty:
+        curr, prev = round(vix_data['Close'].iloc[-1], 2), round(vix_data['Close'].iloc[-2], 2)
+        if curr < 15: status = "🟢 樂觀/貪婪 (低波動)"
+        elif curr < 20: status = "🟡 正常波動 (平穩)"
+        elif curr < 30: status = "🟠 恐慌加劇 (高波動)"
+        else: status = "🔴 極度恐慌 (非理性拋售)"
+        col1, col2 = st.columns([1, 2])
+        col1.metric(label=f"當前 VIX 指數", value=curr, delta=round(curr-prev, 2), delta_color="inverse")
+        col1.subheader(f"{status}")
+        col2.info("🟢 低於15(過熱) | 🟡 15~20(平穩) | 🟠 20~30(恐慌升溫) | 🔴 高於30(股災/危機入市點)")
+        st.line_chart(vix_data[['Close']].rename(columns={'Close': 'VIX 指數'}))
+
+# -------------------------------------------------------------------
+# 分頁 F：個股 K 線與進場分析
+# -------------------------------------------------------------------
+elif page == "🔍 個股 K 線與進場分析":
+    st.title("🔍 個股技術分析與策略面板")
+    
+    wl_options = ["手動輸入代號..."] + [f"{item['股票代號']} {item['股票名稱']}" for item in st.session_state.get('watchlist', [])]
+    wl_choice = st.selectbox("📂 從自選股快速帶入", wl_options)
+    
+    col1, col2, col3 = st.columns([2, 1, 2])
+    with col1: 
+        if wl_choice == "手動輸入代號...": target_ticker = st.text_input("輸入股票代號", value="2330")
+        else: target_ticker = st.text_input("目前分析代號", value=wl_choice.split(" ")[0], disabled=True)
+    with col2: period_option = st.selectbox("資料期間", ["3mo", "6mo", "1y", "2y"], index=1)
+    with col3: selected_indicators = st.multiselect("📈 附加技術指標", ["MACD", "RSI"], default=["MACD", "RSI"])
+    
+    if target_ticker:
+        hist_data, actual_symbol = fetch_stock_history(target_ticker, period=period_option)
+        if hist_data is not None:
+            hist_data['MA5'] = hist_data['Close'].rolling(window=5).mean()
+            hist_data['MA20'] = hist_data['Close'].rolling(window=20).mean()
+            latest_ma5, latest_ma20 = hist_data['MA5'].iloc[-1], hist_data['MA20'].iloc[-1]
+            latest_date = hist_data.index[-1].strftime("%Y-%m-%d")
+            latest_open, latest_high, latest_low, latest_close = hist_data['Open'].iloc[-1], hist_data['High'].iloc[-1], hist_data['Low'].iloc[-1], hist_data['Close'].iloc[-1]
+            latest_volume = int(hist_data['Volume'].iloc[-1])
+            
+            exp1 = hist_data['Close'].ewm(span=12, adjust=False).mean()
+            exp2 = hist_data['Close'].ewm(span=26, adjust=False).mean()
+            hist_data['MACD'] = exp1 - exp2
+            hist_data['Signal'] = hist_data['MACD'].ewm(span=9, adjust=False).mean()
+            hist_data['MACD_Hist'] = hist_data['MACD'] - hist_data['Signal']
+            
+            delta = hist_data['Close'].diff()
+            up, down = delta.clip(lower=0), -1 * delta.clip(upper=0)
+            ema_up, ema_down = up.ewm(com=13, adjust=False).mean(), down.ewm(com=13, adjust=False).mean()
+            rs = ema_up / ema_down
+            hist_data['RSI'] = 100 - (100 / (1 + rs))
+
+            hist_data['H-L'] = hist_data['High'] - hist_data['Low']
+            hist_data['H-PC'] = abs(hist_data['High'] - hist_data['Close'].shift(1))
+            hist_data['L-PC'] = abs(hist_data['Low'] - hist_data['Close'].shift(1))
+            hist_data['TR'] = hist_data[['H-L', 'H-PC', 'L-PC']].max(axis=1)
+            hist_data['ATR'] = hist_data['TR'].rolling(window=14).mean()
+            latest_atr = hist_data['ATR'].iloc[-1]
+
+            st.markdown(f"### 📅 最新交易日資訊 ({latest_date})")
+            if len(hist_data) > 1:
+                price_change = latest_close - hist_data['Close'].iloc[-2]
+                price_change_pct = (price_change / hist_data['Close'].iloc[-2]) * 100
+            else: price_change = price_change_pct = 0
+
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("開盤價", f"{latest_open:.2f}")
+            m2.metric("最高價", f"{latest_high:.2f}")
+            m3.metric("最低價", f"{latest_low:.2f}")
+            m4.metric("收盤價", f"{latest_close:.2f}", f"{price_change:.2f} ({price_change_pct:.2f}%)", delta_color="inverse")
+            m5.metric("成交量 (股)", f"{latest_volume:,}")
+            st.divider()
+
+            num_rows = 2 + len(selected_indicators)
+            row_heights = [0.5, 0.2]
+            if len(selected_indicators) == 1: row_heights.append(0.3)
+            elif len(selected_indicators) == 2: row_heights.extend([0.15, 0.15])
+
+            fig = make_subplots(rows=num_rows, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=row_heights)
+            fig.add_trace(go.Candlestick(x=hist_data.index, open=hist_data['Open'], high=hist_data['High'], low=hist_data['Low'], close=hist_data['Close'], name='K線', increasing_line_color='red', decreasing_line_color='green'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=hist_data.index, y=hist_data['MA5'], line=dict(color='blue', width=1), name='MA5'), row=1, col=1)
+            fig.add_trace(go.Scatter(x=hist_data.index, y=hist_data['MA20'], line=dict(color='orange', width=1), name='MA20'), row=1, col=1)
+            
+            colors = ['red' if row['Close'] >= row['Open'] else 'green' for _, row in hist_data.iterrows()]
+            fig.add_trace(go.Bar(x=hist_data.index, y=hist_data['Volume'], marker_color=colors, name='成交量'), row=2, col=1)
+            
+            current_row = 3
+            if "MACD" in selected_indicators:
+                macd_colors = ['red' if val >= 0 else 'green' for val in hist_data['MACD_Hist']]
+                fig.add_trace(go.Bar(x=hist_data.index, y=hist_data['MACD_Hist'], marker_color=macd_colors, name='MACD 柱狀圖'), row=current_row, col=1)
+                fig.add_trace(go.Scatter(x=hist_data.index, y=hist_data['MACD'], line=dict(color='blue', width=1), name='MACD 線'), row=current_row, col=1)
+                fig.add_trace(go.Scatter(x=hist_data.index, y=hist_data['Signal'], line=dict(color='orange', width=1), name='Signal 線'), row=current_row, col=1)
+                fig.update_yaxes(title_text="MACD", row=current_row, col=1)
+                current_row += 1
+                
+            if "RSI" in selected_indicators:
+                fig.add_trace(go.Scatter(x=hist_data.index, y=hist_data['RSI'], line=dict(color='purple', width=1.5), name='RSI (14)'), row=current_row, col=1)
+                fig.add_hline(y=70, line_dash="dot", line_color="red", row=current_row, col=1)
+                fig.add_hline(y=30, line_dash="dot", line_color="green", row=current_row, col=1)
+                fig.update_yaxes(title_text="RSI", range=[0, 100], row=current_row, col=1)
+
+            fig.update_layout(xaxis_rangeslider_visible=False, height=600 if num_rows==2 else 700 if num_rows==3 else 800, margin=dict(l=20, r=20, t=30, b=20), showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown("### 🤖 系統技術面與進出場策略")
+            if pd.isna(latest_ma20) or pd.isna(latest_atr): st.warning("資料不足。")
+            else:
+                if latest_close > latest_ma20 and latest_ma5 > latest_ma20: trend_status, entry_advice, entry_price, entry_label = "📈 **強勢多頭**", "建議在股價量縮回測 MA5 不破時進場。", latest_ma5, "📍 建議進場價"
+                elif latest_close > latest_ma20 and latest_ma5 <= latest_ma20: trend_status, entry_advice, entry_price, entry_label = "🪀 **反彈震盪**", "密切觀察 MA20 是否能確實守住轉為支撐。", latest_ma20, "📍 建議進場價"
+                elif latest_close <= latest_ma20 and latest_ma5 > latest_ma20: trend_status, entry_advice, entry_price, entry_label = "⚠️ **短線轉弱**", "跌破重要支撐！建議暫時觀望。", latest_close, "📍 試算基準"
+                else: trend_status, entry_advice, entry_price, entry_label = "📉 **弱勢空頭**", "強烈建議「不要進場接刀」。", latest_close, "📍 試算基準"
+
+                st.info(f"**目前盤勢：** {trend_status}  \n**操作建議：** {entry_advice}")
+
+                recent_10d_low = hist_data['Low'].tail(10).min()
+                atr_stop = entry_price - (1.5 * latest_atr)
+                stop_loss_price = min(recent_10d_low, atr_stop) 
+                if (entry_price - stop_loss_price) / entry_price > 0.1: stop_loss_price = entry_price * 0.90
+                take_profit_price = entry_price + ((entry_price - stop_loss_price) * 2)
+                
+                st.markdown("#### 🎯 動態波動防護模型 (風報比 1:2)")
+                col_e, col_s, col_t = st.columns(3)
+                col_e.metric(entry_label, f"{round(entry_price, 2)}")
+                col_s.metric("🛡️ 建議停損價", f"{round(stop_loss_price, 2)}", f"{round(((stop_loss_price - entry_price) / entry_price) * 100, 2)} %", delta_color="off")
+                col_t.metric("💰 目標停利價", f"{round(take_profit_price, 2)}", f"+{round(((take_profit_price - entry_price) / entry_price) * 100, 2)} %", delta_color="normal")
+        else: st.error("找不到該股票代號的資料。")
